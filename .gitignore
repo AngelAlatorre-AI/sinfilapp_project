@@ -1,0 +1,10 @@
+# Bases de datos SQLite
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
