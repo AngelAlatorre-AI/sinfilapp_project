@@ -1,1 +1,113 @@
-# Pruebas de CRUD local y snapshot en base de datos en memoria
+"""Pruebas de CRUD local y snapshot en base de datos SQLite (T-07).
+
+Cubre CA-01.1 (alta exitosa), CA-01.3 / restricciones CHECK (rechazo de
+datos inválidos) y CA-01.4 (borrado físico conservando historial_pagos).
+"""
+
+import sqlite3
+from contextlib import closing
+
+import pytest
+
+from database.db_manager import DBManager
+
+SERVICIO_VALIDO = {
+    "nombre": "CFE Hogar",
+    "categoria": "Electricidad",
+    "fecha_limite": "2026-11-15",
+    "periodicidad": "MENSUAL",
+    "url_oficial": "https://app.cfe.mx",
+    "dias_anticipacion_alerta": 3,
+}
+
+
+@pytest.fixture
+def db_path(tmp_path):
+    """Ruta a un archivo .db temporal que se elimina al terminar el test."""
+    ruta = tmp_path / "sinfilapp_test.db"
+    yield ruta
+    ruta.unlink(missing_ok=True)
+
+
+@pytest.fixture
+def db(db_path):
+    """DBManager con las tablas servicios e historial_pagos creadas."""
+    manager = DBManager(str(db_path))
+    exito, mensaje = manager.inicializar_bd()
+    assert exito, mensaje
+    return manager
+
+
+def contar_servicios(db_path):
+    with closing(sqlite3.connect(db_path)) as conexion:
+        consulta = "SELECT COUNT(*) FROM servicios"
+        return conexion.execute(consulta).fetchone()[0]
+
+
+# --- CA-01.1: caso normal --------------------------------------------------
+
+def test_crear_servicio_valido_se_guarda_y_se_lee(db):
+    exito, mensaje = db.crear_servicio(SERVICIO_VALIDO)
+
+    assert exito is True, mensaje
+    servicios = db.leer_servicios()
+    assert len(servicios) == 1
+    guardado = servicios[0]
+    assert guardado["id"] == 1
+    for campo, valor in SERVICIO_VALIDO.items():
+        assert guardado[campo] == valor
+
+
+# --- CA-01.3 / CHECK: casos de error ---------------------------------------
+
+@pytest.mark.parametrize(
+    "campo, valor_invalido",
+    [
+        ("nombre", None),               # NOT NULL
+        ("periodicidad", "Mensual"),    # CHECK catálogo en mayúsculas
+        ("categoria", "Luz"),           # CHECK catálogo cerrado
+        ("dias_anticipacion_alerta", 8),  # CHECK rango 1 a 7
+        ("dias_anticipacion_alerta", 0),  # CHECK rango 1 a 7
+    ],
+)
+def test_crear_servicio_invalido_retorna_false_sin_excepcion(
+    db, db_path, campo, valor_invalido
+):
+    datos = {**SERVICIO_VALIDO, campo: valor_invalido}
+
+    exito, mensaje = db.crear_servicio(datos)
+
+    assert exito is False
+    assert "Error al registrar el servicio" in mensaje
+    assert contar_servicios(db_path) == 0
+
+
+# --- CA-01.4: caso límite, borrado físico e integridad ---------------------
+
+def test_eliminar_servicio_conserva_historial_con_servicio_id_null(
+    db, db_path
+):
+    db.crear_servicio(SERVICIO_VALIDO)
+    servicio_id = db.leer_servicios()[0]["id"]
+    with sqlite3.connect(db_path) as conexion:
+        conexion.execute(
+            "INSERT INTO historial_pagos (servicio_id, "
+            "nombre_servicio_snapshot, fecha_pago_realizado, "
+            "fecha_limite_cubierta) VALUES (?, ?, ?, ?)",
+            (servicio_id, "CFE Hogar", "2026-10-18", "2026-10-15"),
+        )
+    conexion.close()
+
+    exito, mensaje = db.eliminar_servicio(servicio_id)
+
+    assert exito is True, mensaje
+    assert db.leer_servicio(servicio_id) is None
+    assert contar_servicios(db_path) == 0
+    with sqlite3.connect(db_path) as conexion:
+        historial = conexion.execute(
+            "SELECT servicio_id, nombre_servicio_snapshot, "
+            "fecha_pago_realizado, fecha_limite_cubierta "
+            "FROM historial_pagos"
+        ).fetchall()
+    conexion.close()
+    assert historial == [(None, "CFE Hogar", "2026-10-18", "2026-10-15")]
