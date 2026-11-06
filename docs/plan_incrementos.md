@@ -6,8 +6,8 @@
 | RF-01 | CRUD físico de servicios local | Funcional | Alta | Ninguna | 5 | Implementado (Inc 1) |
 | RF-02 | Panel ordenado con semáforo | Funcional | Alta | RF-01 | 5 | Implementado (Inc 1) |
 | RF-03 | Marcar pago y avanzar fecha | Funcional | Alta | RF-01, RF-02 | 5 | Implementado (Inc 2) |
-| RF-04 | Notificaciones locales 1-7 días | Funcional | Med/Baja| RF-01 | 5 | Pendiente |
-| RF-05 | Redirección HTTPS oficial | Funcional | Media | RF-01, RF-02 | 5 | Pendiente |
+| RF-04 | Notificaciones locales 1-7 días | Funcional | Med/Baja| RF-01 | 5 | Implementado (Inc 3, Opción A: avisos in-app) |
+| RF-05 | Redirección HTTPS oficial | Funcional | Media | RF-01, RF-02 | 5 | Implementado (Inc 3) |
 | RF-06 | Historial local con snapshot | Funcional | Alta | RF-03 | 5 | Implementado (Inc 2) |
 
 ## Incremento 2: v0.2.0
@@ -42,3 +42,11 @@
 5. "Pagado" es solo una etiqueta visual del historial; no existe columna de estado en BD.
 6. Se permite marcar como pagado en cualquier estado, incluso por adelantado.
 7. El historial se ordena del pago más reciente al más antiguo y se accede desde un ícono en la barra superior del Dashboard.
+8. RF-04 (Opción A aprobada): Flet 0.23.2 no programa notificaciones nativas en segundo plano. CA-02.1 se reinterpreta como aviso in-app (banner) calculado al vuelo a partir de `fecha_limite - dias_anticipacion_alerta`, mostrado al abrir la app y al volver a ella (`on_app_lifecycle_state_change`). La fecha de alerta no se persiste: editar, pagar o eliminar la recalcula automáticamente.
+9. CA-02.4 (opción a): el permiso se consulta con `ft.PermissionHandler` solo en Android/iOS; en escritorio es "no soportado" y no se muestra el banner de permisos.
+10. Servicios vencidos no generan aviso ni advertencia de "Fecha insuficiente".
+11. RF-05: botón dedicado "Ir a pagar"; la red se verifica con una conexión TCP al host del portal (puerto 443, 3 s); `page.launch_url` se inyecta desde la vista hacia `os_utilities`.
+
+## Limitaciones conocidas (Incremento 3)
+* Sin notificaciones del SO con la app cerrada (requiere extensión nativa `flutter_local_notifications` y migrar Flet; trabajo futuro, Opción B).
+* `flet build` 0.23.2 no permite declarar `POST_NOTIFICATIONS` en el AndroidManifest. En Android 13+ el permiso puede reportarse como denegado y mostrar el banner rojo aunque el usuario no lo haya rechazado. Ver `docs/qa_incremento3.md`.
