@@ -30,7 +30,17 @@ class DashboardView(ft.View):
         super().__init__(route="/", padding=12)
         self._page = page
         self._controller = controller
-        self.appbar = ft.AppBar(title=ft.Text("SinFilapp"), center_title=True)
+        self.appbar = ft.AppBar(
+            title=ft.Text("SinFilapp"),
+            center_title=True,
+            actions=[
+                ft.IconButton(
+                    ft.icons.HISTORY,
+                    tooltip="Historial de pagos",
+                    on_click=lambda _: page.go("/historial"),
+                ),
+            ],
+        )
         self.floating_action_button = ft.FloatingActionButton(
             icon=ft.icons.ADD,
             tooltip="Agregar servicio",
@@ -76,11 +86,26 @@ class DashboardView(ft.View):
                 ft.Text(detalle, size=12),
                 ft.Text(vence, size=12),
                 self._etiqueta_estado(servicio["estado"], color),
+                ft.TextButton(
+                    "Marcar pagado",
+                    icon=ft.icons.CHECK_CIRCLE_OUTLINE,
+                    on_click=lambda _: self._marcar_pagado(servicio),
+                ),
             ],
             spacing=2,
             expand=True,
         )
-        acciones = ft.Column(
+        acciones = self._acciones(servicio)
+        return ft.Card(
+            content=ft.Container(
+                padding=12,
+                border=ft.border.only(left=ft.BorderSide(6, color)),
+                content=ft.Row([info, acciones]),
+            )
+        )
+
+    def _acciones(self, servicio):
+        return ft.Column(
             [
                 ft.IconButton(
                     ft.icons.EDIT, tooltip="Editar",
@@ -94,13 +119,6 @@ class DashboardView(ft.View):
                 ),
             ],
             spacing=0,
-        )
-        return ft.Card(
-            content=ft.Container(
-                padding=12,
-                border=ft.border.only(left=ft.BorderSide(6, color)),
-                content=ft.Row([info, acciones]),
-            )
         )
 
     @staticmethod
@@ -136,6 +154,13 @@ class DashboardView(ft.View):
     def _eliminar(self, servicio, dialogo):
         self._page.close(dialogo)
         _, mensaje, _ = self._controller.eliminar_servicio(servicio["id"])
+        self.controls = [self._contenido()]
+        self._page.open(ft.SnackBar(ft.Text(mensaje)))
+        self._page.update()
+
+    def _marcar_pagado(self, servicio):
+        """Registra el pago (RF-03) y refresca la lista con el nuevo ciclo."""
+        _, mensaje, _ = self._controller.marcar_pagado(servicio["id"])
         self.controls = [self._contenido()]
         self._page.open(ft.SnackBar(ft.Text(mensaje)))
         self._page.update()
