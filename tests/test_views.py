@@ -3,13 +3,18 @@
 Verifican el contenido construido y el flujo de eventos sin abrir ventana.
 """
 
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
 
 from modules.service_controller import ServiceController
 from modules.os_utilities import MSG_SIN_CONEXION
-from views.dashboard_view import MSG_SALIR, DashboardView
+from views.dashboard_view import (
+    MSG_PERMISO_DENEGADO,
+    MSG_SALIR,
+    DashboardView,
+)
 from views.history_view import MSG_HISTORIAL_VACIO, HistoryView
 
 DATOS_UI = {
@@ -170,3 +175,71 @@ def test_continuar_sin_red_muestra_alerta_ca_03_2(controller, monkeypatch):
     page.launch_url.assert_not_called()
     alerta = page.open.call_args[0][0]
     assert alerta.content.value == MSG_SIN_CONEXION
+
+
+# --- T-06: banners de avisos y de permisos (RF-04) ------------------------
+
+def _con_permiso(estado):
+    notificador = MagicMock()
+    notificador.estado_permiso.return_value = estado
+    notificador.alertas_activas.side_effect = (
+        lambda servicios, hoy=None: [s for s in servicios
+                                     if s["estado"] == "Próximo a vencer"])
+    ctrl = ServiceController(":memory:", notificador=notificador)
+    ctrl.inicializar()
+    return ctrl, notificador
+
+
+def test_banner_alertas_lista_servicios_por_vencer_ca_02_1(controller):
+    hoy = date.today()
+    controller.crear_servicio({**DATOS_UI, "nombre": "Internet",
+                               "fecha_limite": hoy.isoformat()})
+    controller.crear_servicio({**DATOS_UI, "nombre": "Lejano",
+                               "fecha_limite": "2099-01-01"})
+
+    vista = DashboardView(MagicMock(), controller)
+
+    textos = _textos(vista.controls[0])
+    assert "Tienes 1 pago(s) por vencer" in textos
+    assert "• Internet: Vence hoy" in textos
+    assert not any("Lejano:" in t for t in textos)
+
+
+def test_sin_alertas_no_hay_banner(controller):
+    controller.crear_servicio({**DATOS_UI, "fecha_limite": "2099-01-01"})
+
+    vista = DashboardView(MagicMock(), controller)
+
+    assert not any("por vencer" in t for t in _textos(vista.controls[0]))
+
+
+def test_banner_permiso_denegado_permanente_ca_02_4():
+    ctrl, notificador = _con_permiso("denegado")
+
+    vista = DashboardView(MagicMock(), ctrl)
+
+    assert MSG_PERMISO_DENEGADO in _textos(vista.controls[0])
+    _boton(vista.controls[0], "Activar").on_click(None)
+    notificador.abrir_ajustes.assert_called_once()
+    ctrl.cerrar()
+
+
+@pytest.mark.parametrize("estado", ["concedido", "no_soportado"])
+def test_sin_banner_de_permiso(estado):
+    ctrl, _ = _con_permiso(estado)
+
+    vista = DashboardView(MagicMock(), ctrl)
+
+    assert MSG_PERMISO_DENEGADO not in _textos(vista.controls[0])
+    ctrl.cerrar()
+
+
+def test_banner_permiso_tambien_con_lista_vacia():
+    ctrl, _ = _con_permiso("denegado")
+
+    vista = DashboardView(MagicMock(), ctrl)
+
+    textos = _textos(vista.controls[0])
+    assert MSG_PERMISO_DENEGADO in textos
+    assert "No tienes servicios registrados" in textos
+    ctrl.cerrar()
