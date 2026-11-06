@@ -88,6 +88,29 @@ def test_sumar_periodo_invalido_lanza_value_error(fecha, periodicidad):
         dh.sumar_periodo(fecha, periodicidad)
 
 
+# --- Fecha de alerta (RF-04, CA-02.1, CA-02.2) ----------------------------
+
+@pytest.mark.parametrize(
+    "fecha, dias, esperado",
+    [
+        ("2026-11-15", 3, ("2026-11-12", False)),  # CA-02.1
+        ("2026-11-01", 3, ("2026-10-29", False)),  # alerta exactamente hoy
+        ("2026-10-30", 3, ("2026-10-29", True)),   # vence mañana: CA-02.2
+        ("2026-10-29", 1, ("2026-10-29", True)),   # vence hoy
+        ("2026-10-28", 3, (None, False)),          # vencido: sin aviso
+        ("2026-11-05", 7, ("2026-10-29", False)),
+        ("2026-11-05", "7", ("2026-10-29", False)),  # valor de la UI
+    ],
+)
+def test_calcular_fecha_alerta(fecha, dias, esperado):
+    assert dh.calcular_fecha_alerta(fecha, dias, HOY) == esperado
+
+
+def test_calcular_fecha_alerta_usa_hoy_por_defecto():
+    lejana = date(date.today().year + 1, 1, 15).isoformat()
+    assert dh.calcular_fecha_alerta(lejana, 3)[1] is False
+
+
 # --- UrlValidator (RNF-03, CA-01.2) ----------------------------------------
 
 @pytest.mark.parametrize(

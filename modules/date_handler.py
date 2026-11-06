@@ -1,8 +1,8 @@
-"""Validación de fechas ISO 8601, estados (RF-02) y ciclos (RF-03)."""
+"""Fechas ISO 8601: estados (RF-02), ciclos (RF-03) y alertas (RF-04)."""
 
 import calendar
 import re
-from datetime import date
+from datetime import date, timedelta
 
 _PATRON_ISO = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
@@ -65,3 +65,22 @@ def sumar_periodo(fecha_limite, periodicidad):
     mes = indice_mes % 12 + 1
     dia = min(fecha.day, calendar.monthrange(anio, mes)[1])
     return date(anio, mes, dia).isoformat()
+
+
+def calcular_fecha_alerta(fecha_limite, dias_alerta, hoy=None):
+    """Fecha en que debe avisarse al usuario (RF-04, CA-02.1, CA-02.2).
+
+    Retorna (fecha_alerta 'YYYY-MM-DD' | None, insuficiente: bool):
+    - Servicio vencido: (None, False); no se avisa ni se advierte.
+    - Si faltan menos días que dias_alerta: (hoy, True), es decir,
+      "Fecha insuficiente para los días marcados" y aviso el mismo día.
+    - En otro caso: (fecha_limite - dias_alerta, False).
+    """
+    hoy = hoy or date.today()
+    limite = parsear_fecha(fecha_limite)
+    if limite < hoy:
+        return None, False
+    alerta = limite - timedelta(days=int(dias_alerta))
+    if alerta < hoy:
+        return hoy.isoformat(), True
+    return alerta.isoformat(), False
