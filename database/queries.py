@@ -78,3 +78,26 @@ WHERE id = :id;
 """
 
 DELETE_SERVICIO = "DELETE FROM servicios WHERE id = :id;"
+
+# --- Historial de pagos (Incremento 2: RF-03, RF-06) ----------------------
+
+INSERT_PAGO = """
+INSERT INTO historial_pagos (
+    servicio_id, nombre_servicio_snapshot,
+    fecha_pago_realizado, fecha_limite_cubierta
+) VALUES (
+    :servicio_id, :nombre_servicio_snapshot,
+    :fecha_pago_realizado, :fecha_limite_cubierta
+);
+"""
+
+UPDATE_FECHA_LIMITE = """
+UPDATE servicios SET fecha_limite = :nueva_fecha_limite WHERE id = :id;
+"""
+
+SELECT_HISTORIAL = """
+SELECT id, servicio_id, nombre_servicio_snapshot,
+       fecha_pago_realizado, fecha_limite_cubierta
+FROM historial_pagos
+ORDER BY fecha_pago_realizado DESC, id DESC;
+"""
