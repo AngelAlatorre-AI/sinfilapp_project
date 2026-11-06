@@ -134,3 +134,94 @@ def test_eliminar_inexistente(controller):
     exito, mensaje, _ = controller.eliminar_servicio(999)
 
     assert exito is False and "no existe" in mensaje
+
+
+# --- Incremento 2: marcar_pagado y listar_historial (RF-03, RF-06) ---------
+
+def _registrar(controller, **cambios):
+    controller.crear_servicio({**DATOS_UI, **cambios})
+    return controller.listar_servicios(HOY)[2][-1]["id"]
+
+
+def test_pago_tardio_ca_05_1(controller):
+    servicio_id = _registrar(controller, fecha_limite="2026-05-15")
+
+    exito, mensaje, servicio = controller.marcar_pagado(
+        servicio_id, hoy=date(2026, 5, 20))
+
+    assert exito is True
+    assert "2026-06-15" in mensaje
+    assert servicio["fecha_limite"] == "2026-06-15"
+    assert servicio["estado"] == "Pendiente"
+    _, _, historial = controller.listar_historial()
+    assert len(historial) == 1
+    pago = historial[0]
+    assert pago["nombre_servicio_snapshot"] == "CFE Hogar"
+    assert pago["fecha_limite_cubierta"] == "2026-05-15"
+    assert pago["fecha_pago_realizado"] == "2026-05-20"
+
+
+def test_fin_de_mes_ca_05_2(controller):
+    servicio_id = _registrar(controller, fecha_limite="2027-01-31")
+
+    _, _, servicio = controller.marcar_pagado(servicio_id,
+                                              hoy=date(2027, 1, 30))
+
+    assert servicio["fecha_limite"] == "2027-02-28"
+
+
+def test_bisiesto_anual_ca_05_2(controller):
+    servicio_id = _registrar(controller, fecha_limite="2028-02-29",
+                             periodicidad="Anual")
+
+    _, _, servicio = controller.marcar_pagado(servicio_id,
+                                              hoy=date(2028, 2, 29))
+
+    assert servicio["fecha_limite"] == "2029-02-28"
+
+
+def test_estado_calculado_tras_pago_muy_atrasado(controller):
+    servicio_id = _registrar(controller, fecha_limite="2026-05-15")
+
+    _, _, servicio = controller.marcar_pagado(servicio_id,
+                                              hoy=date(2026, 7, 20))
+
+    # Decisión del equipo: no se fuerza "Pendiente"; se muestra el real.
+    assert servicio["fecha_limite"] == "2026-06-15"
+    assert servicio["estado"] == "Vencido"
+
+
+def test_pago_adelantado_permitido(controller):
+    servicio_id = _registrar(controller, fecha_limite="2026-12-15")
+
+    exito, _, servicio = controller.marcar_pagado(servicio_id, hoy=HOY)
+
+    assert exito is True
+    assert servicio["fecha_limite"] == "2027-01-15"
+
+
+def test_marcar_pagado_inexistente(controller):
+    exito, mensaje, datos = controller.marcar_pagado(999, hoy=HOY)
+
+    assert (exito, mensaje, datos) == (False, "El servicio no existe.", None)
+    assert controller.listar_historial()[2] == []
+
+
+def test_historial_vacio_ca_05_3(controller):
+    exito, _, historial = controller.listar_historial()
+
+    assert exito is True and historial == []
+
+
+def test_historial_conserva_snapshot_tras_eliminar_rf_06(controller):
+    servicio_id = _registrar(controller)
+    controller.marcar_pagado(servicio_id, hoy=HOY)
+    controller.actualizar_servicio(servicio_id,
+                                   {**DATOS_UI, "nombre": "CFE Renombrado"})
+
+    controller.eliminar_servicio(servicio_id)
+
+    _, _, historial = controller.listar_historial()
+    assert len(historial) == 1
+    assert historial[0]["nombre_servicio_snapshot"] == "CFE Hogar"
+    assert historial[0]["servicio_id"] is None

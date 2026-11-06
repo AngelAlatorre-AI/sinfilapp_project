@@ -4,6 +4,8 @@ Las vistas solo hablan con ServiceController; nunca con SQLite.
 Todas las operaciones retornan la tupla (exito, mensaje, datos).
 """
 
+from datetime import date
+
 from database.db_manager import DBManager
 from modules import date_handler
 from modules.date_handler import PENDIENTE, PROXIMO, VENCIDO
@@ -119,11 +121,36 @@ class ServiceController:
         exito, mensaje = self._db.eliminar_servicio(servicio_id)
         return exito, mensaje, None
 
-    def obtener_servicio(self, servicio_id):
+    def obtener_servicio(self, servicio_id, hoy=None):
         servicio = self._db.leer_servicio(servicio_id)
         if servicio is None:
             return False, "El servicio no existe.", None
-        return True, "", self._para_vista(servicio)
+        return True, "", self._para_vista(servicio, hoy)
+
+    def marcar_pagado(self, servicio_id, hoy=None):
+        """Registra el pago y avanza la fecha un periodo (RF-03).
+
+        La nueva fecha se calcula siempre sobre la fecha_limite cubierta,
+        no sobre la fecha de pago, para no desfasar el día de corte.
+        """
+        servicio = self._db.leer_servicio(servicio_id)
+        if servicio is None:
+            return False, "El servicio no existe.", None
+        cubierta = servicio["fecha_limite"]
+        nueva = date_handler.sumar_periodo(cubierta, servicio["periodicidad"])
+        fecha_pago = (hoy or date.today()).isoformat()
+        exito, mensaje = self._db.registrar_pago(
+            servicio_id, servicio["nombre"], cubierta, fecha_pago, nueva)
+        if not exito:
+            return False, mensaje, None
+        _, _, actualizado = self.obtener_servicio(servicio_id, hoy)
+        return True, f"Pago registrado. Próximo vencimiento: {nueva}", (
+            actualizado)
+
+    def listar_historial(self):
+        """Pagos registrados, del más reciente al más antiguo (RF-06)."""
+        pagos = self._db.leer_historial()
+        return True, f"{len(pagos)} pago(s).", pagos
 
     def listar_servicios(self, hoy=None):
         """Servicios ordenados por fecha_limite ASC con su estado."""
