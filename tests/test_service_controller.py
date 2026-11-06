@@ -1,10 +1,13 @@
 """Pruebas del ServiceController (T-08, RF-01, RF-02, RNF-05)."""
 
 from datetime import date
+from unittest.mock import MagicMock
 
 import pytest
 
+from modules.os_utilities import MSG_SIN_CONEXION
 from modules.service_controller import (
+    MSG_FECHA_INSUFICIENTE,
     MSG_REQUERIDO,
     MSG_URL,
     ServiceController,
@@ -238,3 +241,96 @@ def test_fallo_de_bd_al_registrar_pago(controller, monkeypatch):
     assert exito is False and "disco lleno" in mensaje and datos is None
     assert controller.obtener_servicio(servicio_id)[2]["fecha_limite"] == (
         "2026-11-15")
+
+
+# --- Incremento 3: alertas, permisos y portal (RF-04, RF-05) ---------------
+
+def test_fecha_insuficiente_advierte_sin_bloquear_ca_02_2(controller):
+    exito, mensaje, errores = controller.crear_servicio(
+        {**DATOS_UI, "fecha_limite": "2026-10-30"}, hoy=HOY)
+
+    assert exito is True and errores == {}
+    assert MSG_FECHA_INSUFICIENTE in mensaje
+    assert len(controller.listar_servicios(HOY)[2]) == 1
+
+
+def test_sin_advertencia_con_fecha_suficiente(controller):
+    _, mensaje, _ = controller.crear_servicio(DATOS_UI, hoy=HOY)
+
+    assert MSG_FECHA_INSUFICIENTE not in mensaje
+
+
+def test_sin_advertencia_para_servicio_vencido(controller):
+    _, mensaje, _ = controller.crear_servicio(
+        {**DATOS_UI, "fecha_limite": "2026-10-01"}, hoy=HOY)
+
+    assert MSG_FECHA_INSUFICIENTE not in mensaje
+
+
+def test_actualizar_con_fecha_insuficiente_advierte(controller):
+    servicio_id = _registrar(controller)
+
+    exito, mensaje, _ = controller.actualizar_servicio(
+        servicio_id, {**DATOS_UI, "fecha_limite": "2026-10-29",
+                      "dias_anticipacion_alerta": "7"}, hoy=HOY)
+
+    assert exito is True and MSG_FECHA_INSUFICIENTE in mensaje
+
+
+def test_alertas_del_dia_ca_02_1(controller):
+    _registrar(controller, nombre="Lejano", fecha_limite="2026-11-15")
+    _registrar(controller, nombre="Pronto", fecha_limite="2026-11-01")
+    _registrar(controller, nombre="Vencido", fecha_limite="2026-10-01")
+
+    _, _, alertas = controller.alertas_del_dia(HOY)
+
+    assert [a["nombre"] for a in alertas] == ["Pronto"]
+    assert alertas[0]["estado"] == "Próximo a vencer"
+
+
+def test_permisos_delegan_en_notificador():
+    notificador = MagicMock()
+    notificador.estado_permiso.return_value = "denegado"
+    notificador.solicitar_permiso.return_value = "concedido"
+    notificador.abrir_ajustes.return_value = False
+    ctrl = ServiceController(":memory:", notificador=notificador)
+
+    assert ctrl.estado_notificaciones() == (True, "", "denegado")
+    assert ctrl.solicitar_permiso_notificaciones()[2] == "concedido"
+    assert ctrl.abrir_ajustes_notificaciones()[0] is False
+    ctrl.cerrar()
+
+
+def test_permiso_no_soportado_por_defecto(controller):
+    assert controller.estado_notificaciones()[2] == "no_soportado"
+
+
+def test_abrir_portal_con_red_ca_03_1(controller):
+    servicio_id = _registrar(controller)
+    lanzador = MagicMock()
+
+    exito, _, _ = controller.abrir_portal(servicio_id, lanzador,
+                                          verificar_red=lambda h: True)
+
+    assert exito is True
+    lanzador.assert_called_once_with("https://app.cfe.mx")
+
+
+def test_abrir_portal_sin_red_ca_03_2(controller):
+    servicio_id = _registrar(controller)
+    lanzador = MagicMock()
+
+    exito, mensaje, _ = controller.abrir_portal(
+        servicio_id, lanzador, verificar_red=lambda h: False)
+
+    assert (exito, mensaje) == (False, MSG_SIN_CONEXION)
+    lanzador.assert_not_called()
+
+
+def test_abrir_portal_inexistente(controller):
+    lanzador = MagicMock()
+
+    exito, mensaje, _ = controller.abrir_portal(999, lanzador)
+
+    assert exito is False and "no existe" in mensaje
+    lanzador.assert_not_called()

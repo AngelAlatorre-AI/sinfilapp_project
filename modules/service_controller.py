@@ -7,7 +7,7 @@ Todas las operaciones retornan la tupla (exito, mensaje, datos).
 from datetime import date
 
 from database.db_manager import DBManager
-from modules import date_handler
+from modules import date_handler, os_utilities
 from modules.date_handler import PENDIENTE, PROXIMO, VENCIDO
 from modules.url_validator import CATEGORIAS, PERIODICIDADES, es_url_segura
 
@@ -19,7 +19,14 @@ __all__ = [
     "PENDIENTE",
     "PROXIMO",
     "VENCIDO",
+    "PERMISO_CONCEDIDO",
+    "PERMISO_DENEGADO",
+    "PERMISO_NO_SOPORTADO",
 ]
+
+PERMISO_CONCEDIDO = os_utilities.PERMISO_CONCEDIDO
+PERMISO_DENEGADO = os_utilities.PERMISO_DENEGADO
+PERMISO_NO_SOPORTADO = os_utilities.PERMISO_NO_SOPORTADO
 
 CAMPOS = (
     "nombre",
@@ -31,6 +38,7 @@ CAMPOS = (
 )
 MSG_REQUERIDO = "Campo requerido"
 MSG_URL = "Formato de enlace inválido o no seguro (use https://)"
+MSG_FECHA_INSUFICIENTE = "Fecha insuficiente para los días marcados"
 
 
 def _dias_validos(valor):
@@ -90,8 +98,9 @@ def _mensaje_errores(errores):
 class ServiceController:
     """Orquesta validaciones, persistencia y cálculo de estados."""
 
-    def __init__(self, db_path="sinfilapp.db"):
+    def __init__(self, db_path="sinfilapp.db", notificador=None):
         self._db = DBManager(db_path)
+        self._notificador = notificador or os_utilities.Notificador()
 
     def inicializar(self):
         exito, mensaje = self._db.inicializar_bd()
@@ -101,20 +110,28 @@ class ServiceController:
         """Libera la conexión persistente (solo aplica a BD en memoria)."""
         self._db.cerrar()
 
-    def crear_servicio(self, datos):
-        errores = validar_servicio(datos)
-        if errores:
-            return False, _mensaje_errores(errores), errores
-        exito, mensaje = self._db.crear_servicio(normalizar_servicio(datos))
-        return exito, mensaje, {}
+    def crear_servicio(self, datos, hoy=None):
+        return self._guardar(datos, self._db.crear_servicio, hoy)
 
-    def actualizar_servicio(self, servicio_id, datos):
+    def actualizar_servicio(self, servicio_id, datos, hoy=None):
+        def actualizar(normalizados):
+            return self._db.actualizar_servicio(servicio_id, normalizados)
+        return self._guardar(datos, actualizar, hoy)
+
+    @staticmethod
+    def _guardar(datos, operacion, hoy):
+        """Valida, normaliza, persiste y advierte de fecha insuficiente."""
         errores = validar_servicio(datos)
         if errores:
             return False, _mensaje_errores(errores), errores
-        exito, mensaje = self._db.actualizar_servicio(
-            servicio_id, normalizar_servicio(datos)
-        )
+        normalizados = normalizar_servicio(datos)
+        exito, mensaje = operacion(normalizados)
+        _, insuficiente = date_handler.calcular_fecha_alerta(
+            normalizados["fecha_limite"],
+            normalizados["dias_anticipacion_alerta"], hoy)
+        if exito and insuficiente:
+            mensaje = (f"{mensaje} {MSG_FECHA_INSUFICIENTE}: "
+                       "el aviso se mostrará hoy.")
         return exito, mensaje, {}
 
     def eliminar_servicio(self, servicio_id):
@@ -146,6 +163,38 @@ class ServiceController:
         _, _, actualizado = self.obtener_servicio(servicio_id, hoy)
         return True, f"Pago registrado. Próximo vencimiento: {nueva}", (
             actualizado)
+
+    def abrir_portal(self, servicio_id, lanzador,
+                     verificar_red=os_utilities.hay_conexion):
+        """Abre la URL oficial si hay red (RF-05, CA-03.1, CA-03.2).
+
+        lanzador: función de la vista que abre el navegador
+        (page.launch_url), inyectada para no acoplar la lógica a Flet.
+        """
+        servicio = self._db.leer_servicio(servicio_id)
+        if servicio is None:
+            return False, "El servicio no existe.", None
+        exito, mensaje = os_utilities.abrir_url(
+            servicio["url_oficial"], lanzador, verificar_red)
+        return exito, mensaje, None
+
+    def alertas_del_dia(self, hoy=None):
+        """Servicios cuyo aviso ya llegó y aún no vencen (RF-04, CA-02.1)."""
+        _, _, servicios = self.listar_servicios(hoy)
+        activas = self._notificador.alertas_activas(servicios, hoy)
+        return True, f"{len(activas)} aviso(s).", activas
+
+    def estado_notificaciones(self):
+        """'concedido', 'denegado' o 'no_soportado' (CA-02.4)."""
+        return True, "", self._notificador.estado_permiso()
+
+    def solicitar_permiso_notificaciones(self):
+        return True, "", self._notificador.solicitar_permiso()
+
+    def abrir_ajustes_notificaciones(self):
+        exito = self._notificador.abrir_ajustes()
+        mensaje = "" if exito else "No se pudieron abrir los ajustes."
+        return exito, mensaje, None
 
     def listar_historial(self):
         """Pagos registrados, del más reciente al más antiguo (RF-06)."""
