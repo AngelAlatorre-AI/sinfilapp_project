@@ -1,6 +1,7 @@
 """Pruebas de Utilidades del SO (Incremento 3: RF-04, RF-05)."""
 
 import socket
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -82,3 +83,88 @@ def test_abrir_url_fallo_del_navegador():
                                    verificar_red=lambda h: True)
 
     assert (exito, mensaje) == (False, osu.MSG_NAVEGADOR)
+
+
+# --- T-03: Notificador (RF-04, CA-02.1, CA-02.4) ----------------------------
+
+HOY = date(2026, 10, 29)
+
+
+class EstadoFalso:
+    def __init__(self, value):
+        self.value = value
+
+
+@pytest.mark.parametrize(
+    "estado, esperado",
+    [
+        (EstadoFalso("granted"), osu.PERMISO_CONCEDIDO),
+        (EstadoFalso("provisional"), osu.PERMISO_CONCEDIDO),
+        (EstadoFalso("denied"), osu.PERMISO_DENEGADO),
+        (EstadoFalso("permanentlyDenied"), osu.PERMISO_DENEGADO),
+        (None, osu.PERMISO_NO_SOPORTADO),
+    ],
+)
+def test_estado_permiso(estado, esperado):
+    manejador = MagicMock()
+    manejador.check_permission.return_value = estado
+
+    notificador = osu.Notificador(manejador, "notification")
+
+    assert notificador.estado_permiso() == esperado
+    manejador.check_permission.assert_called_once_with(
+        "notification", wait_timeout=osu.TIEMPO_ESPERA_PERMISO)
+
+
+def test_sin_manejador_es_no_soportado():
+    notificador = osu.Notificador()
+
+    assert notificador.estado_permiso() == osu.PERMISO_NO_SOPORTADO
+    assert notificador.solicitar_permiso() == osu.PERMISO_NO_SOPORTADO
+    assert notificador.abrir_ajustes() is False
+
+
+def test_manejador_que_falla_es_no_soportado():
+    manejador = MagicMock()
+    manejador.check_permission.side_effect = TimeoutError()
+    manejador.open_app_settings.side_effect = RuntimeError()
+
+    notificador = osu.Notificador(manejador, "notification")
+
+    assert notificador.estado_permiso() == osu.PERMISO_NO_SOPORTADO
+    assert notificador.abrir_ajustes() is False
+
+
+def test_solicitar_permiso_y_abrir_ajustes():
+    manejador = MagicMock()
+    manejador.request_permission.return_value = EstadoFalso("granted")
+    manejador.open_app_settings.return_value = True
+
+    notificador = osu.Notificador(manejador, "notification")
+
+    assert notificador.solicitar_permiso() == osu.PERMISO_CONCEDIDO
+    assert notificador.abrir_ajustes() is True
+
+
+def _servicio(nombre, fecha, dias=3):
+    return {"nombre": nombre, "fecha_limite": fecha,
+            "dias_anticipacion_alerta": dias}
+
+
+def test_alertas_activas_ca_02_1():
+    servicios = [
+        _servicio("Vencido", "2026-10-28"),           # sin aviso
+        _servicio("Hoy", "2026-10-29"),               # vence hoy
+        _servicio("Frontera", "2026-11-01"),          # aviso exactamente hoy
+        _servicio("Fuera", "2026-11-02"),             # aviso mañana
+        _servicio("Siete", "2026-11-05", dias=7),     # aviso hoy con 7 días
+        _servicio("Lejano", "2026-11-15"),
+    ]
+
+    activas = osu.Notificador.alertas_activas(servicios, HOY)
+
+    assert [s["nombre"] for s in activas] == ["Hoy", "Frontera", "Siete"]
+
+
+def test_alertas_activas_lista_vacia():
+    assert osu.Notificador.alertas_activas([]) == []
