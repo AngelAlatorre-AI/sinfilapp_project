@@ -3,18 +3,24 @@
 Verifican el contenido construido y el flujo de eventos sin abrir ventana.
 """
 
-from datetime import date
+from datetime import date, datetime
 from unittest.mock import MagicMock
 
 import pytest
 
 from modules.service_controller import ServiceController
 from modules.os_utilities import MSG_SIN_CONEXION
+from modules.service_controller import (
+    MSG_FECHA_INSUFICIENTE,
+    MSG_REQUERIDO,
+    MSG_URL,
+)
 from views.dashboard_view import (
     MSG_PERMISO_DENEGADO,
     MSG_SALIR,
     DashboardView,
 )
+from views.form_view import FormView
 from views.history_view import MSG_HISTORIAL_VACIO, HistoryView
 
 DATOS_UI = {
@@ -243,3 +249,92 @@ def test_banner_permiso_tambien_con_lista_vacia():
     assert MSG_PERMISO_DENEGADO in textos
     assert "No tienes servicios registrados" in textos
     ctrl.cerrar()
+
+
+# --- T-07: formulario (RF-01, CA-01.x, CA-02.2, CA-02.3) ------------------
+
+def _llenar(vista, datos):
+    for campo, valor in datos.items():
+        vista._campos[campo].value = valor
+
+
+def test_selector_de_dias_restringido_ca_02_3(controller):
+    vista = FormView(MagicMock(), controller)
+
+    dias = vista._campos["dias_anticipacion_alerta"]
+    assert [o.key for o in dias.options] == [str(n) for n in range(1, 8)]
+    assert dias.value == "3"
+
+
+def test_guardar_valido_regresa_al_dashboard_ca_01_1(controller):
+    page = MagicMock()
+    vista = FormView(page, controller)
+    _llenar(vista, {**DATOS_UI, "fecha_limite": "2099-01-01"})
+
+    _boton(vista.controls[0], "Guardar").on_click(None)
+
+    page.go.assert_called_once_with("/")
+    assert len(controller.listar_servicios()[2]) == 1
+    aviso = page.open.call_args[0][0]
+    assert aviso.duration != 6000
+
+
+def test_errores_en_rojo_por_campo_ca_01_2_y_01_3(controller):
+    page = MagicMock()
+    vista = FormView(page, controller)
+    _llenar(vista, {**DATOS_UI, "nombre": "",
+                    "url_oficial": "http://app.cfe.mx"})
+
+    _boton(vista.controls[0], "Guardar").on_click(None)
+
+    assert vista._campos["nombre"].error_text == MSG_REQUERIDO
+    assert vista._campos["url_oficial"].error_text == MSG_URL
+    assert vista._campos["categoria"].error_text is None
+    page.go.assert_not_called()
+    assert controller.listar_servicios()[2] == []
+
+
+def test_fecha_insuficiente_muestra_advertencia_ca_02_2(controller):
+    page = MagicMock()
+    vista = FormView(page, controller)
+    _llenar(vista, {**DATOS_UI, "fecha_limite": date.today().isoformat()})
+
+    _boton(vista.controls[0], "Guardar").on_click(None)
+
+    aviso = page.open.call_args[0][0]
+    assert MSG_FECHA_INSUFICIENTE in aviso.content.value
+    assert aviso.duration == 6000
+    page.go.assert_called_once_with("/")
+    assert len(controller.listar_servicios()[2]) == 1
+
+
+def test_edicion_precarga_y_actualiza_ca_01_4(controller):
+    controller.crear_servicio(DATOS_UI)
+    servicio_id = controller.listar_servicios()[2][0]["id"]
+    page = MagicMock()
+    vista = FormView(page, controller, servicio_id)
+
+    assert vista._campos["nombre"].value == "CFE Hogar"
+    assert vista._campos["periodicidad"].value == "Mensual"
+    vista._campos["nombre"].value = "CFE Casa"
+    _boton(vista.controls[0], "Guardar").on_click(None)
+
+    assert controller.obtener_servicio(servicio_id)[2]["nombre"] == "CFE Casa"
+
+
+def test_edicion_de_servicio_inexistente_avisa(controller):
+    page = MagicMock()
+
+    FormView(page, controller, 999)
+
+    assert "no existe" in page.open.call_args[0][0].content.value
+
+
+def test_selector_de_fecha_llena_el_campo(controller):
+    page = MagicMock()
+    vista = FormView(page, controller)
+    vista._selector_fecha.value = datetime(2026, 12, 31)
+
+    vista._fecha_elegida(None)
+
+    assert vista._campos["fecha_limite"].value == "2026-12-31"

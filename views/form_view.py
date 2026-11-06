@@ -1,4 +1,7 @@
-"""Formulario de alta/edición con catálogos cerrados (T-09, RF-01).
+"""Formulario de alta/edición con catálogos cerrados (RF-01).
+
+Muestra la advertencia "Fecha insuficiente para los días marcados"
+(RF-04, CA-02.2) sin impedir el guardado.
 
 Solo se comunica con ServiceController (RNF-05).
 """
@@ -7,7 +10,11 @@ from datetime import datetime
 
 import flet as ft
 
-from modules.service_controller import CATEGORIAS, PERIODICIDADES
+from modules.service_controller import (
+    CATEGORIAS,
+    MSG_FECHA_INSUFICIENTE,
+    PERIODICIDADES,
+)
 
 
 def _opciones(valores):
@@ -106,8 +113,19 @@ class FormView(ft.View):
             exito, mensaje, errores = self._controller.crear_servicio(datos)
         for campo, control in self._campos.items():
             control.error_text = (errores or {}).get(campo)
-        self._page.open(ft.SnackBar(ft.Text(mensaje)))
+        self._page.open(self._aviso(mensaje))
         if exito:
             self._page.go("/")
         else:
             self._page.update()
+
+    @staticmethod
+    def _aviso(mensaje):
+        """SnackBar normal, o ámbar y más duradero si hay advertencia."""
+        if MSG_FECHA_INSUFICIENTE in mensaje:
+            return ft.SnackBar(
+                ft.Text(mensaje, color=ft.colors.BLACK),
+                bgcolor=ft.colors.AMBER_200,
+                duration=6000,
+            )
+        return ft.SnackBar(ft.Text(mensaje))
