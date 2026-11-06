@@ -1,8 +1,6 @@
-"""Validación de fechas ISO 8601 y cálculo de estados (T-03, RF-02).
+"""Validación de fechas ISO 8601, estados (RF-02) y ciclos (RF-03)."""
 
-La suma de periodos (RF-03) se implementará en el Incremento 2.
-"""
-
+import calendar
 import re
 from datetime import date
 
@@ -11,6 +9,8 @@ _PATRON_ISO = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 PENDIENTE = "Pendiente"
 PROXIMO = "Próximo a vencer"
 VENCIDO = "Vencido"
+
+MESES_POR_PERIODO = {"MENSUAL": 1, "BIMESTRAL": 2, "ANUAL": 12}
 
 
 def parsear_fecha(texto):
@@ -48,3 +48,20 @@ def calcular_estado(fecha_limite, dias_alerta, hoy=None):
     if restantes <= dias_alerta:
         return PROXIMO
     return PENDIENTE
+
+
+def sumar_periodo(fecha_limite, periodicidad):
+    """Avanza la fecha límite cubierta un periodo (RF-03, CA-05.2).
+
+    Si el día no existe en el mes destino se usa el último día válido
+    (31/ene + 1 mes = 28 o 29/feb). Retorna 'YYYY-MM-DD'.
+    """
+    meses = MESES_POR_PERIODO.get(str(periodicidad).upper())
+    if meses is None:
+        raise ValueError(f"Periodicidad desconocida: {periodicidad!r}")
+    fecha = parsear_fecha(fecha_limite)
+    indice_mes = fecha.month - 1 + meses
+    anio = fecha.year + indice_mes // 12
+    mes = indice_mes % 12 + 1
+    dia = min(fecha.day, calendar.monthrange(anio, mes)[1])
+    return date(anio, mes, dia).isoformat()
