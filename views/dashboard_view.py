@@ -1,4 +1,6 @@
-"""Lista principal de servicios con semáforo de estados (T-10, RF-02).
+"""Lista principal de servicios con semáforo de estados (RF-02).
+
+Incluye marcar pagado (RF-03) y la redirección al portal oficial (RF-05).
 
 Solo se comunica con ServiceController (RNF-05).
 """
@@ -12,6 +14,8 @@ COLORES_ESTADO = {
     PROXIMO: ft.colors.AMBER,
     VENCIDO: ft.colors.RED,
 }
+MSG_SALIR = ("¿Deseas salir de SinFilapp para abrir el sitio oficial "
+             "en tu navegador?")
 
 
 def texto_dias(dias):
@@ -86,11 +90,7 @@ class DashboardView(ft.View):
                 ft.Text(detalle, size=12),
                 ft.Text(vence, size=12),
                 self._etiqueta_estado(servicio["estado"], color),
-                ft.TextButton(
-                    "Marcar pagado",
-                    icon=ft.icons.CHECK_CIRCLE_OUTLINE,
-                    on_click=lambda _: self._marcar_pagado(servicio),
-                ),
+                self._botones_pago(servicio),
             ],
             spacing=2,
             expand=True,
@@ -102,6 +102,24 @@ class DashboardView(ft.View):
                 border=ft.border.only(left=ft.BorderSide(6, color)),
                 content=ft.Row([info, acciones]),
             )
+        )
+
+    def _botones_pago(self, servicio):
+        return ft.Row(
+            [
+                ft.TextButton(
+                    "Ir a pagar",
+                    icon=ft.icons.OPEN_IN_NEW,
+                    on_click=lambda _: self._confirmar_salida(servicio),
+                ),
+                ft.TextButton(
+                    "Marcar pagado",
+                    icon=ft.icons.CHECK_CIRCLE_OUTLINE,
+                    on_click=lambda _: self._marcar_pagado(servicio),
+                ),
+            ],
+            wrap=True,
+            spacing=0,
         )
 
     def _acciones(self, servicio):
@@ -164,3 +182,39 @@ class DashboardView(ft.View):
         self.controls = [self._contenido()]
         self._page.open(ft.SnackBar(ft.Text(mensaje)))
         self._page.update()
+
+    def _confirmar_salida(self, servicio):
+        """Diálogo previo a abandonar la app (RF-05, CA-03.1, CA-03.3)."""
+        dialogo = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Ir al portal de pago"),
+            content=ft.Text(MSG_SALIR),
+        )
+        dialogo.actions = [
+            ft.TextButton("Cancelar",
+                          on_click=lambda _: self._page.close(dialogo)),
+            ft.TextButton(
+                "Continuar",
+                on_click=lambda _: self._ir_a_pagar(servicio, dialogo),
+            ),
+        ]
+        self._page.open(dialogo)
+
+    def _ir_a_pagar(self, servicio, dialogo):
+        """Verifica red y abre el navegador; si falla, alerta (CA-03.2)."""
+        self._page.close(dialogo)
+        exito, mensaje, _ = self._controller.abrir_portal(
+            servicio["id"], self._page.launch_url)
+        if not exito:
+            self._mostrar_alerta("No se pudo abrir el sitio", mensaje)
+
+    def _mostrar_alerta(self, titulo, mensaje):
+        alerta = ft.AlertDialog(
+            title=ft.Text(titulo),
+            content=ft.Text(mensaje),
+        )
+        alerta.actions = [
+            ft.TextButton("Aceptar",
+                          on_click=lambda _: self._page.close(alerta)),
+        ]
+        self._page.open(alerta)

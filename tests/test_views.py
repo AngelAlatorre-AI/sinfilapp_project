@@ -8,7 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from modules.service_controller import ServiceController
-from views.dashboard_view import DashboardView
+from modules.os_utilities import MSG_SIN_CONEXION
+from views.dashboard_view import MSG_SALIR, DashboardView
 from views.history_view import MSG_HISTORIAL_VACIO, HistoryView
 
 DATOS_UI = {
@@ -110,3 +111,62 @@ def test_marcar_pagado_desde_tarjeta_avanza_fecha(controller):
     snack = page.open.call_args[0][0]
     assert "Próximo vencimiento: 2026-12-15" in snack.content.value
     page.update.assert_called()
+
+
+# --- T-05: "Ir a pagar" con diálogo de confirmación (RF-05) ---------------
+
+def _abrir_dialogo_salida(controller):
+    controller.crear_servicio(DATOS_UI)
+    page = MagicMock()
+    vista = DashboardView(page, controller)
+    _boton(vista.controls[0], "Ir a pagar").on_click(None)
+    dialogo = page.open.call_args[0][0]
+    return page, dialogo
+
+
+def _accion(dialogo, texto):
+    return next(b for b in dialogo.actions if b.text == texto)
+
+
+def test_ir_a_pagar_muestra_dialogo_ca_03_1(controller):
+    page, dialogo = _abrir_dialogo_salida(controller)
+
+    assert dialogo.content.value == MSG_SALIR
+    page.launch_url.assert_not_called()
+
+
+def test_cancelar_no_abre_navegador_ca_03_3(controller):
+    page, dialogo = _abrir_dialogo_salida(controller)
+
+    _accion(dialogo, "Cancelar").on_click(None)
+
+    page.close.assert_called_once_with(dialogo)
+    page.launch_url.assert_not_called()
+
+
+def _simular_red(controller, monkeypatch, hay_red):
+    original = controller.abrir_portal
+    monkeypatch.setattr(
+        controller, "abrir_portal",
+        lambda sid, lanzador: original(sid, lanzador,
+                                       verificar_red=lambda h: hay_red))
+
+
+def test_continuar_con_red_abre_url_ca_03_1(controller, monkeypatch):
+    page, dialogo = _abrir_dialogo_salida(controller)
+    _simular_red(controller, monkeypatch, hay_red=True)
+
+    _accion(dialogo, "Continuar").on_click(None)
+
+    page.launch_url.assert_called_once_with("https://app.cfe.mx")
+
+
+def test_continuar_sin_red_muestra_alerta_ca_03_2(controller, monkeypatch):
+    page, dialogo = _abrir_dialogo_salida(controller)
+    _simular_red(controller, monkeypatch, hay_red=False)
+
+    _accion(dialogo, "Continuar").on_click(None)
+
+    page.launch_url.assert_not_called()
+    alerta = page.open.call_args[0][0]
+    assert alerta.content.value == MSG_SIN_CONEXION
