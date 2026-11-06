@@ -37,7 +37,7 @@ class DBManager:
         try:
             yield conexion
             conexion.commit()
-        except sqlite3.Error:
+        except Exception:
             conexion.rollback()
             raise
         finally:
@@ -114,3 +114,39 @@ class DBManager:
             return True, "Servicio eliminado correctamente."
         except sqlite3.Error as error:
             return False, f"Error al eliminar el servicio: {error}"
+
+    def registrar_pago(self, servicio_id, nombre_snapshot,
+                       fecha_limite_cubierta, fecha_pago_realizado,
+                       nueva_fecha_limite):
+        """Guarda el pago y avanza la fecha en una sola transacción (RF-03).
+
+        Si cualquiera de las dos sentencias falla, ninguna se aplica.
+        """
+        pago = {
+            "servicio_id": servicio_id,
+            "nombre_servicio_snapshot": nombre_snapshot,
+            "fecha_pago_realizado": fecha_pago_realizado,
+            "fecha_limite_cubierta": fecha_limite_cubierta,
+        }
+        try:
+            with self._conectar() as conexion:
+                cursor = conexion.execute(
+                    queries.UPDATE_FECHA_LIMITE,
+                    {"id": servicio_id,
+                     "nueva_fecha_limite": nueva_fecha_limite},
+                )
+                if cursor.rowcount == 0:
+                    return False, "El servicio no existe."
+                conexion.execute(queries.INSERT_PAGO, pago)
+            return True, "Pago registrado correctamente."
+        except sqlite3.Error as error:
+            return False, f"Error al registrar el pago: {error}"
+
+    def leer_historial(self):
+        """Pagos registrados, del más reciente al más antiguo (RF-06)."""
+        try:
+            with self._conectar() as conexion:
+                filas = conexion.execute(queries.SELECT_HISTORIAL).fetchall()
+            return [dict(fila) for fila in filas]
+        except sqlite3.Error:
+            return []

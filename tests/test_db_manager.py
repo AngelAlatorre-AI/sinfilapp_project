@@ -111,3 +111,91 @@ def test_eliminar_servicio_conserva_historial_con_servicio_id_null(
         ).fetchall()
     conexion.close()
     assert historial == [(None, "CFE Hogar", "2026-10-18", "2026-10-15")]
+
+
+# --- Incremento 2: registrar_pago y leer_historial (RF-03, RF-06) ----------
+
+def _servicio_registrado(db):
+    db.crear_servicio(SERVICIO_VALIDO)
+    return db.leer_servicios()[0]["id"]
+
+
+def test_registrar_pago_guarda_historial_y_avanza_fecha(db):
+    servicio_id = _servicio_registrado(db)
+
+    exito, mensaje = db.registrar_pago(
+        servicio_id, "CFE Hogar", "2026-11-15", "2026-11-20", "2026-12-15")
+
+    assert exito is True, mensaje
+    assert db.leer_servicio(servicio_id)["fecha_limite"] == "2026-12-15"
+    historial = db.leer_historial()
+    assert len(historial) == 1
+    assert historial[0]["servicio_id"] == servicio_id
+    assert historial[0]["nombre_servicio_snapshot"] == "CFE Hogar"
+    assert historial[0]["fecha_limite_cubierta"] == "2026-11-15"
+    assert historial[0]["fecha_pago_realizado"] == "2026-11-20"
+
+
+def test_registrar_pago_servicio_inexistente_no_escribe(db):
+    exito, mensaje = db.registrar_pago(
+        999, "Fantasma", "2026-11-15", "2026-11-20", "2026-12-15")
+
+    assert exito is False and "no existe" in mensaje
+    assert db.leer_historial() == []
+
+
+def test_registrar_pago_fallido_revierte_la_fecha(db):
+    servicio_id = _servicio_registrado(db)
+
+    # nombre_snapshot=None viola NOT NULL en el INSERT, que ocurre después
+    # del UPDATE: la transacción completa debe revertirse.
+    exito, mensaje = db.registrar_pago(
+        servicio_id, None, "2026-11-15", "2026-11-20", "2026-12-15")
+
+    assert exito is False and "Error al registrar el pago" in mensaje
+    assert db.leer_servicio(servicio_id)["fecha_limite"] == "2026-11-15"
+    assert db.leer_historial() == []
+
+
+def test_leer_historial_vacio(db):
+    assert db.leer_historial() == []
+
+
+def test_leer_historial_mas_reciente_primero(db):
+    servicio_id = _servicio_registrado(db)
+    db.registrar_pago(servicio_id, "CFE Hogar", "2026-11-15", "2026-11-14",
+                      "2026-12-15")
+    db.registrar_pago(servicio_id, "CFE Hogar", "2026-12-15", "2026-12-20",
+                      "2027-01-15")
+
+    historial = db.leer_historial()
+
+    assert [p["fecha_limite_cubierta"] for p in historial] == [
+        "2026-12-15", "2026-11-15"]
+
+
+def test_historial_sobrevive_al_borrado_del_servicio(db):
+    servicio_id = _servicio_registrado(db)
+    db.registrar_pago(servicio_id, "CFE Hogar", "2026-11-15", "2026-11-20",
+                      "2026-12-15")
+
+    db.eliminar_servicio(servicio_id)
+
+    historial = db.leer_historial()
+    assert len(historial) == 1
+    assert historial[0]["servicio_id"] is None
+    assert historial[0]["nombre_servicio_snapshot"] == "CFE Hogar"
+
+
+def test_registrar_pago_en_memoria_revierte_sin_dejar_pendientes():
+    manager = DBManager(":memory:")
+    manager.inicializar_bd()
+    servicio_id = _servicio_registrado(manager)
+
+    manager.registrar_pago(servicio_id, None, "2026-11-15", "2026-11-20",
+                           "2026-12-15")
+    manager.crear_servicio({**SERVICIO_VALIDO, "nombre": "Agua"})
+
+    assert manager.leer_servicio(servicio_id)["fecha_limite"] == "2026-11-15"
+    assert manager.leer_historial() == []
+    manager.cerrar()
