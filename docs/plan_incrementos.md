@@ -5,10 +5,10 @@
 |---|---|---|---|---|---|---|
 | RF-01 | CRUD físico de servicios local | Funcional | Alta | Ninguna | 5 | Implementado (Inc 1) |
 | RF-02 | Panel ordenado con semáforo | Funcional | Alta | RF-01 | 5 | Implementado (Inc 1) |
-| RF-03 | Marcar pago y avanzar fecha | Funcional | Alta | RF-01, RF-02 | 5 | Pendiente |
+| RF-03 | Marcar pago y avanzar fecha | Funcional | Alta | RF-01, RF-02 | 5 | Implementado (Inc 2) |
 | RF-04 | Notificaciones locales 1-7 días | Funcional | Med/Baja| RF-01 | 5 | Pendiente |
 | RF-05 | Redirección HTTPS oficial | Funcional | Media | RF-01, RF-02 | 5 | Pendiente |
-| RF-06 | Historial local con snapshot | Funcional | Alta | RF-03 | 5 | Pendiente |
+| RF-06 | Historial local con snapshot | Funcional | Alta | RF-03 | 5 | Implementado (Inc 2) |
 
 ## Incremento 2: v0.2.0
 * **Objetivo:** Implementar ciclo de pago y actualizar fechas, generando historial local.
@@ -37,3 +37,8 @@
 ## Ambigüedades resueltas
 1. Normalización de mayúsculas en periodicidad dentro del controlador.
 2. Uso estricto de formato fecha ISO 8601 (YYYY-MM-DD).
+3. Desfase a fin de mes aceptado: el ciclo se suma sobre la fecha_limite cubierta ya ajustada (31/ene -> 28/feb -> 28/mar); no se agregan columnas.
+4. Tras marcar pagado se muestra el estado calculado real (no se fuerza "Pendiente").
+5. "Pagado" es solo una etiqueta visual del historial; no existe columna de estado en BD.
+6. Se permite marcar como pagado en cualquier estado, incluso por adelantado.
+7. El historial se ordena del pago más reciente al más antiguo y se accede desde un ícono en la barra superior del Dashboard.

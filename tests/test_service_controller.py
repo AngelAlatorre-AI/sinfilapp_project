@@ -225,3 +225,16 @@ def test_historial_conserva_snapshot_tras_eliminar_rf_06(controller):
     assert len(historial) == 1
     assert historial[0]["nombre_servicio_snapshot"] == "CFE Hogar"
     assert historial[0]["servicio_id"] is None
+
+
+def test_fallo_de_bd_al_registrar_pago(controller, monkeypatch):
+    servicio_id = _registrar(controller, fecha_limite="2026-11-15")
+    monkeypatch.setattr(
+        controller._db, "registrar_pago",
+        lambda *args: (False, "Error al registrar el pago: disco lleno"))
+
+    exito, mensaje, datos = controller.marcar_pagado(servicio_id, hoy=HOY)
+
+    assert exito is False and "disco lleno" in mensaje and datos is None
+    assert controller.obtener_servicio(servicio_id)[2]["fecha_limite"] == (
+        "2026-11-15")
