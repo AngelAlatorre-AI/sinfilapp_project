@@ -7,6 +7,7 @@ import flet as ft
 from modules.service_controller import ServiceController
 from views.dashboard_view import DashboardView
 from views.form_view import FormView
+from views.history_view import HistoryView
 
 
 def ruta_base_datos():
@@ -39,6 +40,8 @@ def main(page: ft.Page):
         if page.route.startswith("/form"):
             servicio_id = id_desde_ruta(page.route)
             page.views.append(FormView(page, controller, servicio_id))
+        elif page.route == "/historial":
+            page.views.append(HistoryView(page, controller))
         page.update()
 
     def volver(_):

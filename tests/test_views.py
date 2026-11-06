@@ -1,0 +1,70 @@
+"""Pruebas de las vistas Flet con una página simulada (T-05, T-06).
+
+Verifican el contenido construido y el flujo de eventos sin abrir ventana.
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from modules.service_controller import ServiceController
+from views.history_view import MSG_HISTORIAL_VACIO, HistoryView
+
+DATOS_UI = {
+    "nombre": "CFE Hogar",
+    "categoria": "Electricidad",
+    "fecha_limite": "2026-11-15",
+    "periodicidad": "Mensual",
+    "url_oficial": "https://app.cfe.mx",
+    "dias_anticipacion_alerta": "3",
+}
+
+
+@pytest.fixture
+def controller():
+    ctrl = ServiceController(":memory:")
+    ctrl.inicializar()
+    yield ctrl
+    ctrl.cerrar()
+
+
+def _textos(control):
+    """Recorre el árbol de controles y junta los valores de ft.Text."""
+    textos = []
+    pendientes = [control]
+    while pendientes:
+        actual = pendientes.pop()
+        if getattr(actual, "value", None) and type(actual).__name__ == "Text":
+            textos.append(actual.value)
+        for attr in ("content", "controls"):
+            hijo = getattr(actual, attr, None)
+            if isinstance(hijo, list):
+                pendientes.extend(hijo)
+            elif hijo is not None:
+                pendientes.append(hijo)
+    return textos
+
+
+# --- T-05: HistoryView (RF-06, CA-05.3) ------------------------------------
+
+def test_historial_vacio_muestra_mensaje(controller):
+    vista = HistoryView(MagicMock(), controller)
+
+    assert vista.route == "/historial"
+    assert MSG_HISTORIAL_VACIO in _textos(vista.controls[0])
+
+
+def test_historial_lista_pagos_mas_reciente_primero(controller):
+    controller.crear_servicio(DATOS_UI)
+    servicio_id = controller.listar_servicios()[2][0]["id"]
+    controller.marcar_pagado(servicio_id)
+    controller.marcar_pagado(servicio_id)
+
+    vista = HistoryView(MagicMock(), controller)
+
+    tarjetas = vista.controls[0].controls
+    assert len(tarjetas) == 2
+    primera = _textos(tarjetas[0])
+    assert "CFE Hogar" in primera and "Pagado" in primera
+    assert "Fecha límite cubierta: 2026-12-15" in primera
+    assert "Fecha límite cubierta: 2026-11-15" in _textos(tarjetas[1])
