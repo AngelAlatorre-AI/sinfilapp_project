@@ -234,7 +234,8 @@ def test_fallo_de_bd_al_registrar_pago(controller, monkeypatch):
     servicio_id = _registrar(controller, fecha_limite="2026-11-15")
     monkeypatch.setattr(
         controller._db, "registrar_pago",
-        lambda *args: (False, "Error al registrar el pago: disco lleno"))
+        lambda *args, **kwargs: (
+            False, "Error al registrar el pago: disco lleno"))
 
     exito, mensaje, datos = controller.marcar_pagado(servicio_id, hoy=HOY)
 
@@ -340,15 +341,23 @@ def test_abrir_portal_inexistente(controller):
 
 @pytest.fixture
 def controller_con_pagos(controller):
-    """CFE pagado en oct y nov; Agua en nov y luego eliminado."""
+    """CFE (Electricidad) pagado en oct y nov; Agua en nov y eliminado."""
     cfe = _registrar(controller, nombre="CFE Hogar",
                      fecha_limite="2026-10-15")
-    agua = _registrar(controller, nombre="Agua", fecha_limite="2026-11-20")
+    agua = _registrar(controller, nombre="Agua", categoria="Agua",
+                      fecha_limite="2026-11-20")
     controller.marcar_pagado(cfe, hoy=date(2026, 10, 14))
     controller.marcar_pagado(cfe, hoy=date(2026, 11, 14))
     controller.marcar_pagado(agua, hoy=date(2026, 11, 18))
     controller.eliminar_servicio(agua)
     return controller
+
+
+def test_marcar_pagado_guarda_categoria_snapshot(controller_con_pagos):
+    _, _, pagos = controller_con_pagos.listar_historial()
+
+    assert {p["nombre_servicio_snapshot"]: p["categoria_snapshot"]
+            for p in pagos} == {"CFE Hogar": "Electricidad", "Agua": "Agua"}
 
 
 def test_opciones_filtros_historial(controller_con_pagos):
@@ -358,14 +367,15 @@ def test_opciones_filtros_historial(controller_con_pagos):
     assert opciones == {
         "meses": [("2026-11", "Noviembre 2026"),
                   ("2026-10", "Octubre 2026")],
-        "servicios": ["Agua", "CFE Hogar"],
+        # Orden del catálogo, solo categorías con pagos.
+        "categorias": ["Electricidad", "Agua"],
     }
 
 
 def test_opciones_filtros_sin_historial(controller):
     _, _, opciones = controller.opciones_filtros_historial()
 
-    assert opciones == {"meses": [], "servicios": []}
+    assert opciones == {"meses": [], "categorias": []}
 
 
 def test_listar_historial_por_mes(controller_con_pagos):
@@ -377,23 +387,23 @@ def test_listar_historial_por_mes(controller_con_pagos):
     assert mensaje == "2 pago(s)."
 
 
-def test_listar_historial_por_servicio_eliminado(controller_con_pagos):
-    _, _, pagos = controller_con_pagos.listar_historial(servicio="Agua")
+def test_listar_historial_por_categoria_de_eliminado(controller_con_pagos):
+    _, _, pagos = controller_con_pagos.listar_historial(categoria="Agua")
 
     assert len(pagos) == 1 and pagos[0]["servicio_id"] is None
 
 
 def test_listar_historial_combinado_sin_resultados(controller_con_pagos):
     exito, _, pagos = controller_con_pagos.listar_historial(
-        anio_mes="2026-10", servicio="Agua")
+        anio_mes="2026-10", categoria="Agua")
 
     assert exito is True and pagos == []
 
 
-@pytest.mark.parametrize("servicio", [None, ""])
-def test_servicio_vacio_equivale_a_todos(controller_con_pagos, servicio):
+@pytest.mark.parametrize("categoria", [None, ""])
+def test_categoria_vacia_equivale_a_todas(controller_con_pagos, categoria):
     _, _, pagos = controller_con_pagos.listar_historial(
-        anio_mes="2026-11", servicio=servicio)
+        anio_mes="2026-11", categoria=categoria)
 
     assert len(pagos) == 2
 
@@ -409,4 +419,17 @@ def test_mes_invalido_no_consulta_la_bd(controller_con_pagos, mes,
 
     assert (exito, pagos) == (False, [])
     assert "Mes inválido" in mensaje
+    leer.assert_not_called()
+
+
+@pytest.mark.parametrize("categoria", ["Luz", "CFE Hogar", "agua"])
+def test_categoria_fuera_de_catalogo_no_consulta_la_bd(
+        controller_con_pagos, categoria, monkeypatch):
+    leer = MagicMock()
+    monkeypatch.setattr(controller_con_pagos._db, "leer_historial", leer)
+
+    exito, mensaje, pagos = controller_con_pagos.listar_historial(
+        categoria=categoria)
+
+    assert (exito, mensaje, pagos) == (False, "Categoría inválida.", [])
     leer.assert_not_called()

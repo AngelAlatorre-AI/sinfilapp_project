@@ -201,7 +201,7 @@ def test_registrar_pago_en_memoria_revierte_sin_dejar_pendientes():
     manager.cerrar()
 
 
-# --- refactor-historial: filtros en SQLite (RF-06) --------------------------
+# --- refactor-historial: filtros en SQLite (RF-06.1) ------------------------
 
 PAGOS_FILTRO = [
     # (servicio, fecha_limite_cubierta, fecha_pago_realizado)
@@ -211,23 +211,39 @@ PAGOS_FILTRO = [
     ("Agua", "2026-11-20", "2026-11-01"),
     ("Netflix", "2026-11-05", "2026-11-05"),
 ]
+CATEGORIA = {
+    "CFE Hogar": "Electricidad",
+    "Agua": "Agua",
+    "Netflix": "Streaming / Entretenimiento",
+}
 
 
 @pytest.fixture
 def db_con_pagos(db):
-    """Historial con pagos de 3 servicios en septiembre a noviembre."""
+    """Historial con pagos de 3 categorías en septiembre a noviembre."""
     ids = {}
-    for nombre in ("CFE Hogar", "Agua", "Netflix"):
-        db.crear_servicio({**SERVICIO_VALIDO, "nombre": nombre})
-        ids[nombre] = db.leer_servicios()[-1]["id"]
+    for nombre, categoria in CATEGORIA.items():
+        db.crear_servicio({**SERVICIO_VALIDO, "nombre": nombre,
+                           "categoria": categoria})
+        ids[nombre] = max(s["id"] for s in db.leer_servicios())
     for nombre, cubierta, pagado in PAGOS_FILTRO:
-        db.registrar_pago(ids[nombre], nombre, cubierta, pagado, "2027-01-01")
+        db.registrar_pago(ids[nombre], nombre, cubierta, pagado, "2027-01-01",
+                          categoria_snapshot=CATEGORIA[nombre])
     return db, ids
 
 
 def _resumen(pagos):
     return [(p["nombre_servicio_snapshot"], p["fecha_pago_realizado"])
             for p in pagos]
+
+
+def test_registrar_pago_guarda_categoria_snapshot(db_con_pagos):
+    db, _ = db_con_pagos
+
+    categorias = {p["nombre_servicio_snapshot"]: p["categoria_snapshot"]
+                  for p in db.leer_historial()}
+
+    assert categorias == CATEGORIA
 
 
 def test_historial_sin_filtros_trae_todo(db_con_pagos):
@@ -259,18 +275,31 @@ def test_filtrar_por_mes_usa_fecha_de_pago_no_la_cubierta(db_con_pagos):
     assert _resumen(septiembre) == [("CFE Hogar", "2026-09-14")]
 
 
-def test_filtrar_por_servicio(db_con_pagos):
+def test_filtrar_por_categoria(db_con_pagos):
     db, _ = db_con_pagos
 
-    agua = db.leer_historial(nombre_servicio="Agua")
+    agua = db.leer_historial(categoria="Agua")
 
     assert _resumen(agua) == [("Agua", "2026-11-01"), ("Agua", "2026-10-18")]
+
+
+def test_categoria_agrupa_servicios_de_distinto_nombre(db_con_pagos):
+    db, ids = db_con_pagos
+    db.crear_servicio({**SERVICIO_VALIDO, "nombre": "CFE Oficina"})
+    oficina = max(s["id"] for s in db.leer_servicios())
+    db.registrar_pago(oficina, "CFE Oficina", "2026-10-01", "2026-10-02",
+                      "2026-11-01", categoria_snapshot="Electricidad")
+
+    luz = db.leer_historial(anio_mes="2026-10", categoria="Electricidad")
+
+    assert _resumen(luz) == [("CFE Hogar", "2026-10-31"),
+                             ("CFE Oficina", "2026-10-02")]
 
 
 def test_filtros_combinados(db_con_pagos):
     db, _ = db_con_pagos
 
-    pagos = db.leer_historial(anio_mes="2026-10", nombre_servicio="Agua")
+    pagos = db.leer_historial(anio_mes="2026-10", categoria="Agua")
 
     assert _resumen(pagos) == [("Agua", "2026-10-18")]
 
@@ -279,24 +308,34 @@ def test_combinacion_sin_resultados(db_con_pagos):
     db, _ = db_con_pagos
 
     assert db.leer_historial(anio_mes="2026-09",
-                             nombre_servicio="Netflix") == []
+                             categoria="Streaming / Entretenimiento") == []
 
 
-def test_filtro_por_servicio_incluye_eliminados(db_con_pagos):
+def test_filtro_por_categoria_incluye_eliminados(db_con_pagos):
     db, ids = db_con_pagos
 
     db.eliminar_servicio(ids["Netflix"])
 
-    pagos = db.leer_historial(nombre_servicio="Netflix")
+    pagos = db.leer_historial(categoria="Streaming / Entretenimiento")
     assert _resumen(pagos) == [("Netflix", "2026-11-05")]
     assert pagos[0]["servicio_id"] is None
-    assert "Netflix" in db.leer_servicios_historial()
+    assert "Streaming / Entretenimiento" in db.leer_categorias_historial()
+
+
+def test_categoria_snapshot_no_cambia_al_editar_el_servicio(db_con_pagos):
+    db, ids = db_con_pagos
+
+    db.actualizar_servicio(ids["Agua"], {**SERVICIO_VALIDO, "nombre": "Agua",
+                                         "categoria": "Otro"})
+
+    assert len(db.leer_historial(categoria="Agua")) == 2
+    assert db.leer_historial(categoria="Otro") == []
 
 
 def test_filtro_resistente_a_inyeccion_sql(db_con_pagos):
     db, _ = db_con_pagos
 
-    assert db.leer_historial(nombre_servicio="x' OR '1'='1") == []
+    assert db.leer_historial(categoria="x' OR '1'='1") == []
     assert db.leer_historial(anio_mes="2026-10' OR '1'='1") == []
     assert len(db.leer_historial()) == 5
 
@@ -307,15 +346,16 @@ def test_opciones_de_meses_sin_repetir_y_recientes_primero(db_con_pagos):
     assert db.leer_meses_historial() == ["2026-11", "2026-10", "2026-09"]
 
 
-def test_opciones_de_servicios_sin_repetir_y_alfabeticas(db_con_pagos):
+def test_opciones_de_categorias_sin_repetir(db_con_pagos):
     db, _ = db_con_pagos
 
-    assert db.leer_servicios_historial() == ["Agua", "CFE Hogar", "Netflix"]
+    assert sorted(db.leer_categorias_historial()) == sorted(
+        CATEGORIA.values())
 
 
 def test_opciones_vacias_sin_historial(db):
     assert db.leer_meses_historial() == []
-    assert db.leer_servicios_historial() == []
+    assert db.leer_categorias_historial() == []
 
 
 def test_lecturas_ante_error_de_sqlite_retornan_listas_vacias(db, db_path):
@@ -325,3 +365,69 @@ def test_lecturas_ante_error_de_sqlite_retornan_listas_vacias(db, db_path):
 
     assert db.leer_historial(anio_mes="2026-10") == []
     assert db.leer_meses_historial() == []
+
+
+# --- Migración de BD existentes (categoria_snapshot) -----------------------
+
+ESQUEMA_ANTERIOR = """
+CREATE TABLE servicios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL,
+    categoria TEXT NOT NULL, fecha_limite TEXT NOT NULL,
+    periodicidad TEXT NOT NULL, url_oficial TEXT NOT NULL,
+    dias_anticipacion_alerta INTEGER NOT NULL DEFAULT 3
+);
+CREATE TABLE historial_pagos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    servicio_id INTEGER NULL REFERENCES servicios(id) ON DELETE SET NULL,
+    nombre_servicio_snapshot TEXT NOT NULL,
+    fecha_pago_realizado TEXT NOT NULL,
+    fecha_limite_cubierta TEXT NOT NULL
+);
+INSERT INTO servicios VALUES
+    (1, 'Agua Casa', 'Agua', '2026-12-01', 'MENSUAL', 'https://a.mx', 3);
+INSERT INTO historial_pagos VALUES
+    (1, 1, 'Agua Casa', '2026-10-30', '2026-11-01'),
+    (2, NULL, 'Netflix', '2026-10-05', '2026-10-05');
+"""
+
+
+@pytest.fixture
+def db_anterior(db_path):
+    """Archivo .db creado con el esquema previo a categoria_snapshot."""
+    with closing(sqlite3.connect(db_path)) as conexion:
+        conexion.executescript(ESQUEMA_ANTERIOR)
+    return db_path
+
+
+def _columnas_historial(db_path):
+    with closing(sqlite3.connect(db_path)) as conexion:
+        return [fila[1] for fila in conexion.execute(
+            "PRAGMA table_info(historial_pagos)")]
+
+
+def test_migracion_agrega_columna_y_rellena_categorias(db_anterior):
+    manager = DBManager(str(db_anterior))
+
+    exito, mensaje = manager.inicializar_bd()
+
+    assert exito is True, mensaje
+    assert "categoria_snapshot" in _columnas_historial(db_anterior)
+    categorias = {p["nombre_servicio_snapshot"]: p["categoria_snapshot"]
+                  for p in manager.leer_historial()}
+    # Servicio existente: copia su categoría; eliminado: 'Otro'.
+    assert categorias == {"Agua Casa": "Agua", "Netflix": "Otro"}
+
+
+def test_migracion_es_idempotente(db_anterior):
+    manager = DBManager(str(db_anterior))
+    manager.inicializar_bd()
+
+    exito, _ = manager.inicializar_bd()
+
+    assert exito is True
+    assert _columnas_historial(db_anterior).count("categoria_snapshot") == 1
+    assert len(manager.leer_historial()) == 2
+
+
+def test_bd_nueva_ya_trae_la_columna(db, db_path):
+    assert "categoria_snapshot" in _columnas_historial(db_path)

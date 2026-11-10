@@ -349,11 +349,13 @@ def test_selector_de_fecha_llena_el_campo(controller):
 
 @pytest.fixture
 def con_pagos(controller):
-    """CFE pagado en oct y nov 2026; Agua en nov 2026 y luego eliminado."""
+    """CFE (Electricidad) pagado en oct y nov; Agua en nov y eliminado."""
     ids = {}
-    for nombre, fecha in (("CFE Hogar", "2026-10-15"),
-                          ("Agua", "2026-11-20")):
+    for nombre, categoria, fecha in (
+            ("CFE Hogar", "Electricidad", "2026-10-15"),
+            ("Agua", "Agua", "2026-11-20")):
         controller.crear_servicio({**DATOS_UI, "nombre": nombre,
+                                   "categoria": categoria,
                                    "fecha_limite": fecha})
         ids[nombre] = max(s["id"] for s in controller.listar_servicios()[2])
     controller.marcar_pagado(ids["CFE Hogar"], hoy=date(2026, 10, 14))
@@ -379,17 +381,25 @@ def test_opciones_de_filtros_vienen_del_controlador(con_pagos):
     vista = HistoryView(MagicMock(), con_pagos)
 
     meses = [(o.key, o.text) for o in vista.filtro_mes.options]
-    servicios = [o.key for o in vista.filtro_servicio.options]
+    categorias = [o.key for o in vista.filtro_categoria.options]
+    assert vista.filtro_categoria.label == "Categoría"
     assert meses == [(TODOS, "Todos"), ("2026-11", "Noviembre 2026"),
                      ("2026-10", "Octubre 2026")]
-    assert servicios == [TODOS, "Agua", "CFE Hogar"]
+    assert categorias == [TODOS, "Electricidad", "Agua"]
 
 
-def test_estado_inicial_mes_reciente_y_todos_ca_06_1_1(con_pagos):
+def test_tarjeta_muestra_la_categoria(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    textos = _textos(vista._lista)
+    assert "Electricidad" in textos and "Agua" in textos
+
+
+def test_estado_inicial_mes_reciente_y_todas_ca_06_1_1(con_pagos):
     vista = HistoryView(MagicMock(), con_pagos)
 
     assert vista.filtro_mes.value == "2026-11"
-    assert vista.filtro_servicio.value == TODOS
+    assert vista.filtro_categoria.value == TODOS
     assert _fechas_pago(vista) == ["Pagado el: 2026-11-14",
                                    "Pagado el: 2026-11-18"]
 
@@ -405,12 +415,12 @@ def test_cambiar_mes_actualiza_lista_ca_06_1_2(con_pagos):
     page.update.assert_called_once()
 
 
-def test_filtro_por_servicio_eliminado_ca_06_1_4(con_pagos):
+def test_filtro_por_categoria_incluye_eliminado_ca_06_1_4(con_pagos):
     vista = HistoryView(MagicMock(), con_pagos)
 
     vista.filtro_mes.value = TODOS
-    vista.filtro_servicio.value = "Agua"
-    vista.filtro_servicio.on_change(None)
+    vista.filtro_categoria.value = "Agua"
+    vista.filtro_categoria.on_change(None)
 
     textos = _textos(vista._lista)
     assert "Agua" in textos and "CFE Hogar" not in textos
@@ -421,8 +431,8 @@ def test_combinacion_sin_resultados_ca_06_1_3(con_pagos):
     vista = HistoryView(MagicMock(), con_pagos)
 
     vista.filtro_mes.value = "2026-10"
-    vista.filtro_servicio.value = "Agua"
-    vista.filtro_servicio.on_change(None)
+    vista.filtro_categoria.value = "Agua"
+    vista.filtro_categoria.on_change(None)
 
     assert _textos(vista._lista) == [MSG_SIN_RESULTADOS]
 

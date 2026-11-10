@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS historial_pagos (
     servicio_id INTEGER NULL
         REFERENCES servicios(id) ON DELETE SET NULL,
     nombre_servicio_snapshot TEXT NOT NULL,
+    categoria_snapshot TEXT NOT NULL DEFAULT 'Otro',
     fecha_pago_realizado TEXT NOT NULL,
     fecha_limite_cubierta TEXT NOT NULL
 );
@@ -83,10 +84,10 @@ DELETE_SERVICIO = "DELETE FROM servicios WHERE id = :id;"
 
 INSERT_PAGO = """
 INSERT INTO historial_pagos (
-    servicio_id, nombre_servicio_snapshot,
+    servicio_id, nombre_servicio_snapshot, categoria_snapshot,
     fecha_pago_realizado, fecha_limite_cubierta
 ) VALUES (
-    :servicio_id, :nombre_servicio_snapshot,
+    :servicio_id, :nombre_servicio_snapshot, :categoria_snapshot,
     :fecha_pago_realizado, :fecha_limite_cubierta
 );
 """
@@ -97,14 +98,14 @@ UPDATE servicios SET fecha_limite = :nueva_fecha_limite WHERE id = :id;
 
 # Filtros opcionales (refactor-historial): si un parámetro es NULL, ese
 # filtro no se aplica. :anio_mes usa el formato 'YYYY-MM' sobre la fecha
-# real de pago; :servicio compara contra el snapshot del nombre, por lo
-# que incluye pagos de servicios ya eliminados (servicio_id NULL).
+# real de pago; :categoria compara contra la categoría guardada al pagar
+# (snapshot), por lo que incluye pagos de servicios ya eliminados.
 SELECT_HISTORIAL = """
-SELECT id, servicio_id, nombre_servicio_snapshot,
+SELECT id, servicio_id, nombre_servicio_snapshot, categoria_snapshot,
        fecha_pago_realizado, fecha_limite_cubierta
 FROM historial_pagos
 WHERE (:anio_mes IS NULL OR substr(fecha_pago_realizado, 1, 7) = :anio_mes)
-  AND (:servicio IS NULL OR nombre_servicio_snapshot = :servicio)
+  AND (:categoria IS NULL OR categoria_snapshot = :categoria)
 ORDER BY fecha_pago_realizado DESC, id DESC;
 """
 
@@ -114,8 +115,27 @@ FROM historial_pagos
 ORDER BY anio_mes DESC;
 """
 
-SELECT_SERVICIOS_HISTORIAL = """
-SELECT DISTINCT nombre_servicio_snapshot AS nombre
-FROM historial_pagos
-ORDER BY nombre COLLATE NOCASE ASC;
+SELECT_CATEGORIAS_HISTORIAL = """
+SELECT DISTINCT categoria_snapshot AS categoria
+FROM historial_pagos;
+"""
+
+# --- Migración: categoria_snapshot en BD creadas antes del cambio ---------
+
+PRAGMA_COLUMNAS_HISTORIAL = "PRAGMA table_info(historial_pagos);"
+
+ALTER_HISTORIAL_CATEGORIA = """
+ALTER TABLE historial_pagos
+ADD COLUMN categoria_snapshot TEXT NOT NULL DEFAULT 'Otro';
+"""
+
+# Pagos previos: se copia la categoría actual del servicio; si el servicio
+# ya fue eliminado (servicio_id NULL) queda 'Otro'.
+BACKFILL_CATEGORIA_SNAPSHOT = """
+UPDATE historial_pagos
+SET categoria_snapshot = COALESCE(
+    (SELECT s.categoria FROM servicios s
+     WHERE s.id = historial_pagos.servicio_id),
+    'Otro'
+);
 """

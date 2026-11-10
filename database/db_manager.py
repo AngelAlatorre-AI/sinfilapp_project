@@ -56,6 +56,7 @@ class DBManager:
             with self._conectar() as conexion:
                 conexion.execute(queries.CREATE_TABLE_SERVICIOS)
                 conexion.execute(queries.CREATE_TABLE_HISTORIAL_PAGOS)
+                self._migrar_categoria_snapshot(conexion)
             return True, "Base de datos inicializada correctamente."
         except sqlite3.Error as error:
             return False, f"Error al inicializar la base de datos: {error}"
@@ -115,9 +116,25 @@ class DBManager:
         except sqlite3.Error as error:
             return False, f"Error al eliminar el servicio: {error}"
 
+    @staticmethod
+    def _migrar_categoria_snapshot(conexion):
+        """Agrega categoria_snapshot a BD anteriores y rellena sus pagos.
+
+        ALTER y UPDATE van en la misma transacción: si el relleno falla,
+        la columna tampoco se agrega y se reintenta en el próximo arranque.
+        """
+        columnas = {fila[1] for fila in conexion.execute(
+            queries.PRAGMA_COLUMNAS_HISTORIAL)}
+        if "categoria_snapshot" in columnas:
+            return
+        if not conexion.in_transaction:
+            conexion.execute("BEGIN")
+        conexion.execute(queries.ALTER_HISTORIAL_CATEGORIA)
+        conexion.execute(queries.BACKFILL_CATEGORIA_SNAPSHOT)
+
     def registrar_pago(self, servicio_id, nombre_snapshot,
                        fecha_limite_cubierta, fecha_pago_realizado,
-                       nueva_fecha_limite):
+                       nueva_fecha_limite, categoria_snapshot="Otro"):
         """Guarda el pago y avanza la fecha en una sola transacción (RF-03).
 
         Si cualquiera de las dos sentencias falla, ninguna se aplica.
@@ -125,6 +142,7 @@ class DBManager:
         pago = {
             "servicio_id": servicio_id,
             "nombre_servicio_snapshot": nombre_snapshot,
+            "categoria_snapshot": categoria_snapshot,
             "fecha_pago_realizado": fecha_pago_realizado,
             "fecha_limite_cubierta": fecha_limite_cubierta,
         }
@@ -142,13 +160,13 @@ class DBManager:
         except sqlite3.Error as error:
             return False, f"Error al registrar el pago: {error}"
 
-    def leer_historial(self, anio_mes=None, nombre_servicio=None):
+    def leer_historial(self, anio_mes=None, categoria=None):
         """Pagos del más reciente al más antiguo (RF-06).
 
         Filtros opcionales aplicados en SQLite (WHERE): anio_mes 'YYYY-MM'
-        sobre fecha_pago_realizado y nombre_servicio sobre el snapshot.
+        sobre fecha_pago_realizado y categoria sobre categoria_snapshot.
         """
-        filtros = {"anio_mes": anio_mes, "servicio": nombre_servicio}
+        filtros = {"anio_mes": anio_mes, "categoria": categoria}
         try:
             with self._conectar() as conexion:
                 filas = conexion.execute(
@@ -161,9 +179,9 @@ class DBManager:
         """Meses 'YYYY-MM' con al menos un pago, del más reciente."""
         return self._leer_columna(queries.SELECT_MESES_HISTORIAL)
 
-    def leer_servicios_historial(self):
-        """Nombres (snapshot) con pagos, incluidos servicios eliminados."""
-        return self._leer_columna(queries.SELECT_SERVICIOS_HISTORIAL)
+    def leer_categorias_historial(self):
+        """Categorías (snapshot) con pagos, incluidos servicios eliminados."""
+        return self._leer_columna(queries.SELECT_CATEGORIAS_HISTORIAL)
 
     def _leer_columna(self, consulta):
         try:

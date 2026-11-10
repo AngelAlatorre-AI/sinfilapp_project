@@ -1,6 +1,6 @@
 """Pantalla del historial de pagos con filtros (RF-06, RF-06.1).
 
-Los filtros por Mes y por Servicio se aplican en SQLite a través del
+Los filtros por Mes y por Categoría se aplican en SQLite a través del
 controlador; las opciones de los Dropdowns también las entrega el
 controlador. Solo se comunica con ServiceController (RNF-05).
 """
@@ -17,7 +17,7 @@ def _opcion_todos():
 
 
 class HistoryView(ft.View):
-    """Pagos del más reciente al más antiguo, filtrables por mes/servicio."""
+    """Pagos del más reciente al más antiguo, por mes y categoría."""
 
     def __init__(self, page, controller):
         super().__init__(route="/historial", padding=12,
@@ -33,12 +33,12 @@ class HistoryView(ft.View):
         self._lista = ft.Column(spacing=8)
         self._cargar_lista()
         self.controls = [ft.Column(
-            [ft.Row([self.filtro_mes, self.filtro_servicio]), self._lista],
+            [ft.Row([self.filtro_mes, self.filtro_categoria]), self._lista],
             spacing=12,
         )]
 
     def _crear_filtros(self, opciones):
-        """Mes inicia en el más reciente con pagos; Servicio en Todos."""
+        """Mes inicia en el más reciente con pagos; Categoría en Todos."""
         self.filtro_mes = ft.Dropdown(
             label="Mes",
             options=[_opcion_todos()] + [
@@ -48,11 +48,11 @@ class HistoryView(ft.View):
             on_change=self._al_filtrar,
             expand=True,
         )
-        self.filtro_servicio = ft.Dropdown(
-            label="Servicio",
+        self.filtro_categoria = ft.Dropdown(
+            label="Categoría",
             options=[_opcion_todos()] + [
-                ft.dropdown.Option(nombre)
-                for nombre in opciones["servicios"]],
+                ft.dropdown.Option(categoria)
+                for categoria in opciones["categorias"]],
             value=TODOS,
             on_change=self._al_filtrar,
             expand=True,
@@ -65,7 +65,7 @@ class HistoryView(ft.View):
 
     def _cargar_lista(self):
         _, _, pagos = self._controller.listar_historial(
-            self._valor(self.filtro_mes), self._valor(self.filtro_servicio))
+            self._valor(self.filtro_mes), self._valor(self.filtro_categoria))
         if pagos:
             self._lista.controls = [self._tarjeta(p) for p in pagos]
         else:
@@ -107,6 +107,7 @@ class HistoryView(ft.View):
             [
                 ft.Text(pago["nombre_servicio_snapshot"],
                         weight=ft.FontWeight.BOLD, size=16),
+                ft.Text(pago["categoria_snapshot"], size=12),
                 ft.Text(f"Fecha límite cubierta: "
                         f"{pago['fecha_limite_cubierta']}", size=12),
                 ft.Text(f"Pagado el: {pago['fecha_pago_realizado']}",
