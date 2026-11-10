@@ -199,3 +199,129 @@ def test_registrar_pago_en_memoria_revierte_sin_dejar_pendientes():
     assert manager.leer_servicio(servicio_id)["fecha_limite"] == "2026-11-15"
     assert manager.leer_historial() == []
     manager.cerrar()
+
+
+# --- refactor-historial: filtros en SQLite (RF-06) --------------------------
+
+PAGOS_FILTRO = [
+    # (servicio, fecha_limite_cubierta, fecha_pago_realizado)
+    ("CFE Hogar", "2026-09-15", "2026-09-14"),
+    ("CFE Hogar", "2026-10-15", "2026-10-31"),
+    ("Agua", "2026-10-20", "2026-10-18"),
+    ("Agua", "2026-11-20", "2026-11-01"),
+    ("Netflix", "2026-11-05", "2026-11-05"),
+]
+
+
+@pytest.fixture
+def db_con_pagos(db):
+    """Historial con pagos de 3 servicios en septiembre a noviembre."""
+    ids = {}
+    for nombre in ("CFE Hogar", "Agua", "Netflix"):
+        db.crear_servicio({**SERVICIO_VALIDO, "nombre": nombre})
+        ids[nombre] = db.leer_servicios()[-1]["id"]
+    for nombre, cubierta, pagado in PAGOS_FILTRO:
+        db.registrar_pago(ids[nombre], nombre, cubierta, pagado, "2027-01-01")
+    return db, ids
+
+
+def _resumen(pagos):
+    return [(p["nombre_servicio_snapshot"], p["fecha_pago_realizado"])
+            for p in pagos]
+
+
+def test_historial_sin_filtros_trae_todo(db_con_pagos):
+    db, _ = db_con_pagos
+
+    assert len(db.leer_historial()) == 5
+    assert db.leer_historial(None, None) == db.leer_historial()
+
+
+def test_filtrar_por_mes_respeta_frontera(db_con_pagos):
+    db, _ = db_con_pagos
+
+    octubre = db.leer_historial(anio_mes="2026-10")
+    noviembre = db.leer_historial(anio_mes="2026-11")
+
+    assert _resumen(octubre) == [("CFE Hogar", "2026-10-31"),
+                                 ("Agua", "2026-10-18")]
+    assert _resumen(noviembre) == [("Netflix", "2026-11-05"),
+                                   ("Agua", "2026-11-01")]
+
+
+def test_filtrar_por_mes_usa_fecha_de_pago_no_la_cubierta(db_con_pagos):
+    db, _ = db_con_pagos
+
+    # El ciclo de CFE con fecha límite 2026-10-15 se pagó en octubre;
+    # el de Agua con fecha límite 2026-11-20 se pagó el 2026-11-01.
+    septiembre = db.leer_historial(anio_mes="2026-09")
+
+    assert _resumen(septiembre) == [("CFE Hogar", "2026-09-14")]
+
+
+def test_filtrar_por_servicio(db_con_pagos):
+    db, _ = db_con_pagos
+
+    agua = db.leer_historial(nombre_servicio="Agua")
+
+    assert _resumen(agua) == [("Agua", "2026-11-01"), ("Agua", "2026-10-18")]
+
+
+def test_filtros_combinados(db_con_pagos):
+    db, _ = db_con_pagos
+
+    pagos = db.leer_historial(anio_mes="2026-10", nombre_servicio="Agua")
+
+    assert _resumen(pagos) == [("Agua", "2026-10-18")]
+
+
+def test_combinacion_sin_resultados(db_con_pagos):
+    db, _ = db_con_pagos
+
+    assert db.leer_historial(anio_mes="2026-09",
+                             nombre_servicio="Netflix") == []
+
+
+def test_filtro_por_servicio_incluye_eliminados(db_con_pagos):
+    db, ids = db_con_pagos
+
+    db.eliminar_servicio(ids["Netflix"])
+
+    pagos = db.leer_historial(nombre_servicio="Netflix")
+    assert _resumen(pagos) == [("Netflix", "2026-11-05")]
+    assert pagos[0]["servicio_id"] is None
+    assert "Netflix" in db.leer_servicios_historial()
+
+
+def test_filtro_resistente_a_inyeccion_sql(db_con_pagos):
+    db, _ = db_con_pagos
+
+    assert db.leer_historial(nombre_servicio="x' OR '1'='1") == []
+    assert db.leer_historial(anio_mes="2026-10' OR '1'='1") == []
+    assert len(db.leer_historial()) == 5
+
+
+def test_opciones_de_meses_sin_repetir_y_recientes_primero(db_con_pagos):
+    db, _ = db_con_pagos
+
+    assert db.leer_meses_historial() == ["2026-11", "2026-10", "2026-09"]
+
+
+def test_opciones_de_servicios_sin_repetir_y_alfabeticas(db_con_pagos):
+    db, _ = db_con_pagos
+
+    assert db.leer_servicios_historial() == ["Agua", "CFE Hogar", "Netflix"]
+
+
+def test_opciones_vacias_sin_historial(db):
+    assert db.leer_meses_historial() == []
+    assert db.leer_servicios_historial() == []
+
+
+def test_lecturas_ante_error_de_sqlite_retornan_listas_vacias(db, db_path):
+    with sqlite3.connect(db_path) as conexion:
+        conexion.execute("DROP TABLE historial_pagos")
+    conexion.close()
+
+    assert db.leer_historial(anio_mes="2026-10") == []
+    assert db.leer_meses_historial() == []

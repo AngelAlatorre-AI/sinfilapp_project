@@ -95,9 +95,27 @@ UPDATE_FECHA_LIMITE = """
 UPDATE servicios SET fecha_limite = :nueva_fecha_limite WHERE id = :id;
 """
 
+# Filtros opcionales (refactor-historial): si un parámetro es NULL, ese
+# filtro no se aplica. :anio_mes usa el formato 'YYYY-MM' sobre la fecha
+# real de pago; :servicio compara contra el snapshot del nombre, por lo
+# que incluye pagos de servicios ya eliminados (servicio_id NULL).
 SELECT_HISTORIAL = """
 SELECT id, servicio_id, nombre_servicio_snapshot,
        fecha_pago_realizado, fecha_limite_cubierta
 FROM historial_pagos
+WHERE (:anio_mes IS NULL OR substr(fecha_pago_realizado, 1, 7) = :anio_mes)
+  AND (:servicio IS NULL OR nombre_servicio_snapshot = :servicio)
 ORDER BY fecha_pago_realizado DESC, id DESC;
+"""
+
+SELECT_MESES_HISTORIAL = """
+SELECT DISTINCT substr(fecha_pago_realizado, 1, 7) AS anio_mes
+FROM historial_pagos
+ORDER BY anio_mes DESC;
+"""
+
+SELECT_SERVICIOS_HISTORIAL = """
+SELECT DISTINCT nombre_servicio_snapshot AS nombre
+FROM historial_pagos
+ORDER BY nombre COLLATE NOCASE ASC;
 """

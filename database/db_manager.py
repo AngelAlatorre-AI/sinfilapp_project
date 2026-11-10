@@ -142,11 +142,33 @@ class DBManager:
         except sqlite3.Error as error:
             return False, f"Error al registrar el pago: {error}"
 
-    def leer_historial(self):
-        """Pagos registrados, del más reciente al más antiguo (RF-06)."""
+    def leer_historial(self, anio_mes=None, nombre_servicio=None):
+        """Pagos del más reciente al más antiguo (RF-06).
+
+        Filtros opcionales aplicados en SQLite (WHERE): anio_mes 'YYYY-MM'
+        sobre fecha_pago_realizado y nombre_servicio sobre el snapshot.
+        """
+        filtros = {"anio_mes": anio_mes, "servicio": nombre_servicio}
         try:
             with self._conectar() as conexion:
-                filas = conexion.execute(queries.SELECT_HISTORIAL).fetchall()
+                filas = conexion.execute(
+                    queries.SELECT_HISTORIAL, filtros).fetchall()
             return [dict(fila) for fila in filas]
+        except sqlite3.Error:
+            return []
+
+    def leer_meses_historial(self):
+        """Meses 'YYYY-MM' con al menos un pago, del más reciente."""
+        return self._leer_columna(queries.SELECT_MESES_HISTORIAL)
+
+    def leer_servicios_historial(self):
+        """Nombres (snapshot) con pagos, incluidos servicios eliminados."""
+        return self._leer_columna(queries.SELECT_SERVICIOS_HISTORIAL)
+
+    def _leer_columna(self, consulta):
+        try:
+            with self._conectar() as conexion:
+                filas = conexion.execute(consulta).fetchall()
+            return [fila[0] for fila in filas]
         except sqlite3.Error:
             return []
