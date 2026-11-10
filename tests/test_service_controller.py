@@ -334,3 +334,79 @@ def test_abrir_portal_inexistente(controller):
 
     assert exito is False and "no existe" in mensaje
     lanzador.assert_not_called()
+
+
+# --- refactor-historial: filtros (RF-06.1) ---------------------------------
+
+@pytest.fixture
+def controller_con_pagos(controller):
+    """CFE pagado en oct y nov; Agua en nov y luego eliminado."""
+    cfe = _registrar(controller, nombre="CFE Hogar",
+                     fecha_limite="2026-10-15")
+    agua = _registrar(controller, nombre="Agua", fecha_limite="2026-11-20")
+    controller.marcar_pagado(cfe, hoy=date(2026, 10, 14))
+    controller.marcar_pagado(cfe, hoy=date(2026, 11, 14))
+    controller.marcar_pagado(agua, hoy=date(2026, 11, 18))
+    controller.eliminar_servicio(agua)
+    return controller
+
+
+def test_opciones_filtros_historial(controller_con_pagos):
+    exito, _, opciones = controller_con_pagos.opciones_filtros_historial()
+
+    assert exito is True
+    assert opciones == {
+        "meses": [("2026-11", "Noviembre 2026"),
+                  ("2026-10", "Octubre 2026")],
+        "servicios": ["Agua", "CFE Hogar"],
+    }
+
+
+def test_opciones_filtros_sin_historial(controller):
+    _, _, opciones = controller.opciones_filtros_historial()
+
+    assert opciones == {"meses": [], "servicios": []}
+
+
+def test_listar_historial_por_mes(controller_con_pagos):
+    _, mensaje, pagos = controller_con_pagos.listar_historial(
+        anio_mes="2026-11")
+
+    assert [p["nombre_servicio_snapshot"] for p in pagos] == [
+        "Agua", "CFE Hogar"]
+    assert mensaje == "2 pago(s)."
+
+
+def test_listar_historial_por_servicio_eliminado(controller_con_pagos):
+    _, _, pagos = controller_con_pagos.listar_historial(servicio="Agua")
+
+    assert len(pagos) == 1 and pagos[0]["servicio_id"] is None
+
+
+def test_listar_historial_combinado_sin_resultados(controller_con_pagos):
+    exito, _, pagos = controller_con_pagos.listar_historial(
+        anio_mes="2026-10", servicio="Agua")
+
+    assert exito is True and pagos == []
+
+
+@pytest.mark.parametrize("servicio", [None, ""])
+def test_servicio_vacio_equivale_a_todos(controller_con_pagos, servicio):
+    _, _, pagos = controller_con_pagos.listar_historial(
+        anio_mes="2026-11", servicio=servicio)
+
+    assert len(pagos) == 2
+
+
+@pytest.mark.parametrize("mes", ["2026-13", "noviembre", "2026-11-01", ""])
+def test_mes_invalido_no_consulta_la_bd(controller_con_pagos, mes,
+                                        monkeypatch):
+    leer = MagicMock()
+    monkeypatch.setattr(controller_con_pagos._db, "leer_historial", leer)
+
+    exito, mensaje, pagos = controller_con_pagos.listar_historial(
+        anio_mes=mes)
+
+    assert (exito, pagos) == (False, [])
+    assert "Mes inválido" in mensaje
+    leer.assert_not_called()

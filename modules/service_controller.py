@@ -196,10 +196,28 @@ class ServiceController:
         mensaje = "" if exito else "No se pudieron abrir los ajustes."
         return exito, mensaje, None
 
-    def listar_historial(self):
-        """Pagos registrados, del más reciente al más antiguo (RF-06)."""
-        pagos = self._db.leer_historial()
+    def listar_historial(self, anio_mes=None, servicio=None):
+        """Pagos del más reciente al más antiguo (RF-06, RF-06.1).
+
+        anio_mes ('YYYY-MM') y servicio (nombre en snapshot) son filtros
+        opcionales que se aplican en SQLite; None significa "Todos".
+        """
+        if anio_mes is not None and not date_handler.es_anio_mes_valido(
+                anio_mes):
+            return False, "Mes inválido (use YYYY-MM).", []
+        pagos = self._db.leer_historial(anio_mes, servicio or None)
         return True, f"{len(pagos)} pago(s).", pagos
+
+    def opciones_filtros_historial(self):
+        """Opciones de los filtros del historial calculadas por SQLite.
+
+        datos = {"meses": [("2026-10", "Octubre 2026"), ...] (recientes
+        primero), "servicios": ["Agua", ...] (incluye eliminados)}.
+        """
+        meses = [(m, date_handler.etiqueta_mes(m))
+                 for m in self._db.leer_meses_historial()]
+        servicios = self._db.leer_servicios_historial()
+        return True, "", {"meses": meses, "servicios": servicios}
 
     def listar_servicios(self, hoy=None):
         """Servicios ordenados por fecha_limite ASC con su estado."""
