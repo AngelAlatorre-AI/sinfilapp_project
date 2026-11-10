@@ -1,15 +1,23 @@
-"""Pantalla de visualización del historial de pagos (T-05, RF-06).
+"""Pantalla del historial de pagos con filtros (RF-06, RF-06.1).
 
-Solo se comunica con ServiceController (RNF-05).
+Los filtros por Mes y por Servicio se aplican en SQLite a través del
+controlador; las opciones de los Dropdowns también las entrega el
+controlador. Solo se comunica con ServiceController (RNF-05).
 """
 
 import flet as ft
 
 MSG_HISTORIAL_VACIO = "Aún no tienes pagos registrados en tu historial"
+MSG_SIN_RESULTADOS = "No hay pagos para los filtros seleccionados"
+TODOS = "__todos__"
+
+
+def _opcion_todos():
+    return ft.dropdown.Option(key=TODOS, text="Todos")
 
 
 class HistoryView(ft.View):
-    """Lista de pagos registrados, del más reciente al más antiguo."""
+    """Pagos del más reciente al más antiguo, filtrables por mes/servicio."""
 
     def __init__(self, page, controller):
         super().__init__(route="/historial", padding=12,
@@ -17,13 +25,57 @@ class HistoryView(ft.View):
         self._page = page
         self._controller = controller
         self.appbar = ft.AppBar(title=ft.Text("Historial de pagos"))
-        self.controls = [self._contenido()]
+        _, _, opciones = controller.opciones_filtros_historial()
+        if not opciones["meses"]:
+            self.controls = [self._estado_vacio()]  # CA-05.3: sin filtros
+            return
+        self._crear_filtros(opciones)
+        self._lista = ft.Column(spacing=8)
+        self._cargar_lista()
+        self.controls = [ft.Column(
+            [ft.Row([self.filtro_mes, self.filtro_servicio]), self._lista],
+            spacing=12,
+        )]
 
-    def _contenido(self):
-        _, _, pagos = self._controller.listar_historial()
-        if not pagos:
-            return self._estado_vacio()
-        return ft.Column([self._tarjeta(p) for p in pagos], spacing=8)
+    def _crear_filtros(self, opciones):
+        """Mes inicia en el más reciente con pagos; Servicio en Todos."""
+        self.filtro_mes = ft.Dropdown(
+            label="Mes",
+            options=[_opcion_todos()] + [
+                ft.dropdown.Option(key=clave, text=etiqueta)
+                for clave, etiqueta in opciones["meses"]],
+            value=opciones["meses"][0][0],
+            on_change=self._al_filtrar,
+            expand=True,
+        )
+        self.filtro_servicio = ft.Dropdown(
+            label="Servicio",
+            options=[_opcion_todos()] + [
+                ft.dropdown.Option(nombre)
+                for nombre in opciones["servicios"]],
+            value=TODOS,
+            on_change=self._al_filtrar,
+            expand=True,
+        )
+
+    @staticmethod
+    def _valor(dropdown):
+        """None representa "Todos" para el controlador."""
+        return None if dropdown.value in (None, TODOS) else dropdown.value
+
+    def _cargar_lista(self):
+        _, _, pagos = self._controller.listar_historial(
+            self._valor(self.filtro_mes), self._valor(self.filtro_servicio))
+        if pagos:
+            self._lista.controls = [self._tarjeta(p) for p in pagos]
+        else:
+            self._lista.controls = [ft.Text(
+                MSG_SIN_RESULTADOS, size=14, italic=True,
+                text_align=ft.TextAlign.CENTER)]
+
+    def _al_filtrar(self, _):
+        self._cargar_lista()
+        self._page.update()
 
     @staticmethod
     def _estado_vacio():

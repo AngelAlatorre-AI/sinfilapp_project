@@ -21,7 +21,12 @@ from views.dashboard_view import (
     DashboardView,
 )
 from views.form_view import FormView
-from views.history_view import MSG_HISTORIAL_VACIO, HistoryView
+from views.history_view import (
+    MSG_HISTORIAL_VACIO,
+    MSG_SIN_RESULTADOS,
+    TODOS,
+    HistoryView,
+)
 
 DATOS_UI = {
     "nombre": "CFE Hogar",
@@ -75,7 +80,7 @@ def test_historial_lista_pagos_mas_reciente_primero(controller):
 
     vista = HistoryView(MagicMock(), controller)
 
-    tarjetas = vista.controls[0].controls
+    tarjetas = vista._lista.controls
     assert len(tarjetas) == 2
     primera = _textos(tarjetas[0])
     assert "CFE Hogar" in primera and "Pagado" in primera
@@ -338,3 +343,94 @@ def test_selector_de_fecha_llena_el_campo(controller):
     vista._fecha_elegida(None)
 
     assert vista._campos["fecha_limite"].value == "2026-12-31"
+
+
+# --- refactor-historial: filtros en HistoryView (RF-06.1) -----------------
+
+@pytest.fixture
+def con_pagos(controller):
+    """CFE pagado en oct y nov 2026; Agua en nov 2026 y luego eliminado."""
+    ids = {}
+    for nombre, fecha in (("CFE Hogar", "2026-10-15"),
+                          ("Agua", "2026-11-20")):
+        controller.crear_servicio({**DATOS_UI, "nombre": nombre,
+                                   "fecha_limite": fecha})
+        ids[nombre] = controller.listar_servicios()[2][-1]["id"]
+    controller.marcar_pagado(ids["CFE Hogar"], hoy=date(2026, 10, 14))
+    controller.marcar_pagado(ids["CFE Hogar"], hoy=date(2026, 11, 14))
+    controller.marcar_pagado(ids["Agua"], hoy=date(2026, 11, 18))
+    controller.eliminar_servicio(ids["Agua"])
+    return controller
+
+
+def _fechas_pago(vista):
+    return sorted(t for t in _textos(vista._lista)
+                  if t.startswith("Pagado el:"))
+
+
+def test_historial_vacio_no_muestra_filtros_ca_05_3(controller):
+    vista = HistoryView(MagicMock(), controller)
+
+    assert MSG_HISTORIAL_VACIO in _textos(vista.controls[0])
+    assert not hasattr(vista, "filtro_mes")
+
+
+def test_opciones_de_filtros_vienen_del_controlador(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    meses = [(o.key, o.text) for o in vista.filtro_mes.options]
+    servicios = [o.key for o in vista.filtro_servicio.options]
+    assert meses == [(TODOS, "Todos"), ("2026-11", "Noviembre 2026"),
+                     ("2026-10", "Octubre 2026")]
+    assert servicios == [TODOS, "Agua", "CFE Hogar"]
+
+
+def test_estado_inicial_mes_reciente_y_todos_ca_06_1_1(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    assert vista.filtro_mes.value == "2026-11"
+    assert vista.filtro_servicio.value == TODOS
+    assert _fechas_pago(vista) == ["Pagado el: 2026-11-14",
+                                   "Pagado el: 2026-11-18"]
+
+
+def test_cambiar_mes_actualiza_lista_ca_06_1_2(con_pagos):
+    page = MagicMock()
+    vista = HistoryView(page, con_pagos)
+
+    vista.filtro_mes.value = "2026-10"
+    vista.filtro_mes.on_change(None)
+
+    assert _fechas_pago(vista) == ["Pagado el: 2026-10-14"]
+    page.update.assert_called_once()
+
+
+def test_filtro_por_servicio_eliminado_ca_06_1_4(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    vista.filtro_mes.value = TODOS
+    vista.filtro_servicio.value = "Agua"
+    vista.filtro_servicio.on_change(None)
+
+    textos = _textos(vista._lista)
+    assert "Agua" in textos and "CFE Hogar" not in textos
+    assert _fechas_pago(vista) == ["Pagado el: 2026-11-18"]
+
+
+def test_combinacion_sin_resultados_ca_06_1_3(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    vista.filtro_mes.value = "2026-10"
+    vista.filtro_servicio.value = "Agua"
+    vista.filtro_servicio.on_change(None)
+
+    assert _textos(vista._lista) == [MSG_SIN_RESULTADOS]
+
+
+def test_volver_a_todos_restaura_la_lista(con_pagos):
+    vista = HistoryView(MagicMock(), con_pagos)
+
+    vista.filtro_mes.value = TODOS
+    vista.filtro_mes.on_change(None)
+
+    assert len(_fechas_pago(vista)) == 3
