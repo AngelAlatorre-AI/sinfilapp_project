@@ -143,7 +143,7 @@ def test_eliminar_inexistente(controller):
 
 def _registrar(controller, **cambios):
     controller.crear_servicio({**DATOS_UI, **cambios})
-    return controller.listar_servicios(HOY)[2][-1]["id"]
+    return max(s["id"] for s in controller.listar_servicios(HOY)[2])
 
 
 def test_pago_tardio_ca_05_1(controller):

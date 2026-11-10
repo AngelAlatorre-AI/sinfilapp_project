@@ -9,7 +9,7 @@
 | RF-04 | Notificaciones locales 1-7 días | Funcional | Med/Baja| RF-01 | 5 | Implementado (Inc 3, Opción A: avisos in-app) |
 | RF-05 | Redirección HTTPS oficial | Funcional | Media | RF-01, RF-02 | 5 | Implementado (Inc 3) |
 | RF-06 | Historial local con snapshot | Funcional | Alta | RF-03 | 5 | Implementado (Inc 2) |
-| RF-06.1 | Filtros del historial por mes y servicio | Funcional | Media | RF-06 | — | En desarrollo (refactor-historial) |
+| RF-06.1 | Filtros del historial por mes y servicio | Funcional | Media | RF-06 | — | Implementado (refactor-historial) |
 
 ## Incremento 2: v0.2.0
 * **Objetivo:** Implementar ciclo de pago y actualizar fechas, generando historial local.
@@ -47,6 +47,7 @@
 * **Reglas de arquitectura:** el filtrado se hace en SQLite con `WHERE` y parámetros opcionales (`:param IS NULL OR ...`), sin SQL dinámico; las opciones de los Dropdowns las calcula SQLite (`SELECT DISTINCT`) y las entrega el controlador; la vista no importa `sqlite3` (RNF-05).
 * **Decisiones del equipo:** filtro por servicio sobre el snapshot (incluye eliminados); mes según `fecha_pago_realizado` (flujo de caja real); estado inicial = mes más reciente + "Todos"; Dropdowns independientes; sin índices nuevos (sin cambios de esquema).
 * **Rama de Git:** `refactor-historial`
+* **QA manual:** `docs/qa_refactor_historial.md`; datos de demostración con `scripts/datos_demo_historial.py`.
 
 ## Ambigüedades resueltas
 1. Normalización de mayúsculas en periodicidad dentro del controlador.

@@ -355,7 +355,7 @@ def con_pagos(controller):
                           ("Agua", "2026-11-20")):
         controller.crear_servicio({**DATOS_UI, "nombre": nombre,
                                    "fecha_limite": fecha})
-        ids[nombre] = controller.listar_servicios()[2][-1]["id"]
+        ids[nombre] = max(s["id"] for s in controller.listar_servicios()[2])
     controller.marcar_pagado(ids["CFE Hogar"], hoy=date(2026, 10, 14))
     controller.marcar_pagado(ids["CFE Hogar"], hoy=date(2026, 11, 14))
     controller.marcar_pagado(ids["Agua"], hoy=date(2026, 11, 18))
