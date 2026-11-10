@@ -37,15 +37,19 @@
 
 ## Refactor: filtros del historial (RF-06.1)
 * **Motivo:** el historial como lista de scroll infinito no escala; se agregan filtros por **Mes y Año** y por **Servicio**.
-* **RF-06.1 (nuevo):** la pantalla de historial permitirá filtrar los pagos por mes/año de `fecha_pago_realizado` y por `nombre_servicio_snapshot`; ambos filtros son opcionales ("Todos") e independientes, y se combinan con AND.
+* **RF-06.1 (nuevo):** la pantalla de historial permitirá filtrar los pagos por mes/año de `fecha_pago_realizado` y por **categoría** (`categoria_snapshot`); ambos filtros son opcionales ("Todos") e independientes, y se combinan con AND.
 * **Criterios de aceptación propuestos:**
-  * CA-06.1.1: Al abrir el historial, el filtro de Mes muestra el mes más reciente con pagos y el de Servicio "Todos".
+  * CA-06.1.1: Al abrir el historial, el filtro de Mes muestra el mes más reciente con pagos y el de Categoría "Todos".
   * CA-06.1.2: Al cambiar cualquier filtro la lista se actualiza solo con los pagos que cumplen ambos filtros.
   * CA-06.1.3: Si la combinación no tiene pagos se muestra "No hay pagos para los filtros seleccionados".
-  * CA-06.1.4: Los pagos de servicios eliminados siguen apareciendo y siendo filtrables por su nombre en snapshot.
+  * CA-06.1.4: Los pagos de servicios eliminados siguen apareciendo y siendo filtrables por la categoría guardada al pagar.
   * CA-05.3 se conserva: sin historial se muestra "Aún no tienes pagos registrados en tu historial" y no se muestran filtros.
 * **Reglas de arquitectura:** el filtrado se hace en SQLite con `WHERE` y parámetros opcionales (`:param IS NULL OR ...`), sin SQL dinámico; las opciones de los Dropdowns las calcula SQLite (`SELECT DISTINCT`) y las entrega el controlador; la vista no importa `sqlite3` (RNF-05).
-* **Decisiones del equipo:** filtro por servicio sobre el snapshot (incluye eliminados); mes según `fecha_pago_realizado` (flujo de caja real); estado inicial = mes más reciente + "Todos"; Dropdowns independientes; sin índices nuevos (sin cambios de esquema).
+* **Decisiones del equipo:** mes según `fecha_pago_realizado` (flujo de caja real); estado inicial = mes más reciente + "Todos"; Dropdowns independientes; sin índices nuevos.
+* **Cambio posterior (filtro por categoría):** el equipo decidió filtrar por la categoría del catálogo en lugar del nombre libre del servicio (reemplaza al filtro por nombre). Implica un **cambio de esquema** aprobado como excepción a la regla de no agregar columnas:
+  * Nuevo campo `historial_pagos.categoria_snapshot` (TEXT, NOT NULL, default `'Otro'`): copia de `servicios.categoria` al momento de marcar pagado; no cambia si el servicio se edita y se conserva si se elimina. **Actualizar el Diccionario de Datos del Documento 3.**
+  * Migración automática al iniciar la app: si la columna no existe se agrega y se rellena con la categoría actual del servicio, o `'Otro'` si el servicio ya fue eliminado (ALTER + UPDATE en una sola transacción, idempotente).
+  * Las opciones del filtro son solo las categorías con pagos, en el orden del catálogo.
 * **Rama de Git:** `refactor-historial`
 * **QA manual:** `docs/qa_refactor_historial.md`; datos de demostración con `scripts/datos_demo_historial.py`.
 

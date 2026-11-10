@@ -20,26 +20,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from modules.service_controller import ServiceController  # noqa: E402
 
 BASE = {
-    "categoria": "Otro",
     "periodicidad": "Mensual",
     "url_oficial": "https://www.ejemplo.com",
     "dias_anticipacion_alerta": "3",
 }
 DEMO = [
-    # (nombre, fecha límite inicial, fechas de pago, eliminar al final)
-    ("CFE Hogar", "2026-09-15",
+    # (nombre, categoría, fecha límite inicial, fechas de pago, eliminar)
+    ("CFE Hogar", "Electricidad", "2026-09-15",
      [date(2026, 9, 14), date(2026, 10, 15), date(2026, 11, 13)], False),
-    ("Agua", "2026-10-20", [date(2026, 10, 18), date(2026, 11, 5)], False),
-    ("Netflix", "2026-09-05", [date(2026, 9, 5), date(2026, 10, 5)], True),
+    ("CFE Oficina", "Electricidad", "2026-10-01", [date(2026, 10, 2)], False),
+    ("SAPAL", "Agua", "2026-10-20",
+     [date(2026, 10, 18), date(2026, 11, 5)], False),
+    ("Netflix", "Streaming / Entretenimiento", "2026-09-05",
+     [date(2026, 9, 5), date(2026, 10, 5)], True),
 ]
 
 
 def cargar(ruta_bd="sinfilapp.db"):
     controller = ServiceController(ruta_bd)
     controller.inicializar()
-    for nombre, fecha, pagos, eliminar in DEMO:
-        controller.crear_servicio(
-            {**BASE, "nombre": nombre, "fecha_limite": fecha})
+    for nombre, categoria, fecha, pagos, eliminar in DEMO:
+        controller.crear_servicio({**BASE, "nombre": nombre,
+                                   "categoria": categoria,
+                                   "fecha_limite": fecha})
         # La lista viene ordenada por fecha; el recién creado es el id mayor.
         servicio_id = max(s["id"] for s in controller.listar_servicios()[2])
         for pago in pagos:
@@ -53,4 +56,4 @@ if __name__ == "__main__":
     opciones = cargar(*sys.argv[1:2])
     print("Datos de demostración cargados.")
     print("Meses:", ", ".join(etiqueta for _, etiqueta in opciones["meses"]))
-    print("Servicios:", ", ".join(opciones["servicios"]))
+    print("Categorías:", ", ".join(opciones["categorias"]))
