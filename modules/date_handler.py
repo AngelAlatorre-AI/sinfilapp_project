@@ -12,6 +12,13 @@ VENCIDO = "Vencido"
 
 MESES_POR_PERIODO = {"MENSUAL": 1, "BIMESTRAL": 2, "ANUAL": 12}
 
+# Nombres propios para no depender del locale del SO (Windows/Android).
+NOMBRES_MESES = (
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+    "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+)
+_PATRON_ANIO_MES = re.compile(r"^[0-9]{4}-(0[1-9]|1[0-2])$")
+
 
 def parsear_fecha(texto):
     """Convierte 'YYYY-MM-DD' en date. Lanza ValueError si es inválida."""
@@ -84,3 +91,16 @@ def calcular_fecha_alerta(fecha_limite, dias_alerta, hoy=None):
     if alerta < hoy:
         return hoy.isoformat(), True
     return alerta.isoformat(), False
+
+
+def es_anio_mes_valido(texto):
+    """True si el texto tiene el formato 'YYYY-MM' con mes 01 a 12."""
+    return isinstance(texto, str) and bool(_PATRON_ANIO_MES.match(texto))
+
+
+def etiqueta_mes(anio_mes):
+    """'2026-10' -> 'Octubre 2026'. Lanza ValueError si es inválido."""
+    if not es_anio_mes_valido(anio_mes):
+        raise ValueError(f"Mes inválido (use YYYY-MM): {anio_mes!r}")
+    anio, mes = anio_mes.split("-")
+    return f"{NOMBRES_MESES[int(mes) - 1]} {anio}"

@@ -111,6 +111,27 @@ def test_calcular_fecha_alerta_usa_hoy_por_defecto():
     assert dh.calcular_fecha_alerta(lejana, 3)[1] is False
 
 
+# --- Etiquetas de mes para filtros del historial (RF-06.1) ----------------
+
+@pytest.mark.parametrize(
+    "anio_mes, esperado",
+    [("2026-10", "Octubre 2026"), ("2027-01", "Enero 2027"),
+     ("2026-12", "Diciembre 2026"), ("2026-09", "Septiembre 2026")],
+)
+def test_etiqueta_mes(anio_mes, esperado):
+    assert dh.etiqueta_mes(anio_mes) == esperado
+
+
+@pytest.mark.parametrize(
+    "texto", ["2026-13", "2026-00", "2026/10", "2026-1", "26-10",
+              "2026-10-01", "", None],
+)
+def test_anio_mes_invalido(texto):
+    assert dh.es_anio_mes_valido(texto) is False
+    with pytest.raises(ValueError):
+        dh.etiqueta_mes(texto)
+
+
 # --- UrlValidator (RNF-03, CA-01.2) ----------------------------------------
 
 @pytest.mark.parametrize(
